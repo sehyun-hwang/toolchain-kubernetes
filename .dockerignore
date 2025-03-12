@@ -1,5 +1,6 @@
 node_modules
 Dockerfile
+docker-compose.yml
 .env.local
 .env.development
 **/*.spec.ts

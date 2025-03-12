@@ -7,13 +7,13 @@
     "types": [
       "vitest/globals",
       "vitest/importMeta",
-      "vite/client",
+      // "vite/client",
       "vitest",
       "node"
     ]
   },
   "include": [
-    "vitest.config.mts",
+    "vitest.config.ts",
     "src/**/*"
   ],
   "exclude": [

@@ -1,34 +1,34 @@
-import {registerProvider} from "@tsed/di";
-import {DataSource} from "typeorm";
-import {Logger} from "@tsed/logger";
+import type { Type } from '@tsed/core';
+import { injectable } from '@tsed/di';
+import { Logger } from '@tsed/logger';
+import { DataSource } from 'typeorm';
 
-export const PostgresDatasource = Symbol.for("PostgresDatasource");
+export const PostgresDatasource = Symbol.for('PostgresDatasource');
 export type PostgresDatasource = DataSource;
 export const postgresDatasource = new DataSource({
-  type: "postgres",
+  type: 'postgres',
   entities: [],
-  host: "localhost",
+  host: 'ep-fragrant-king-057290.ap-southeast-1.aws.neon.tech',
   port: 5432,
-  username: "test",
-  password: "test",
-  database: "test"
+  username: 'hwanghyun3',
+  // password: 'test',
+  database: 'tsed',
 });
 
-
-registerProvider<DataSource>({
+injectable<Type<DataSource>>(PostgresDatasource, {
   provide: PostgresDatasource,
-  type: "typeorm:datasource",
+  type: 'typeorm:datasource',
   deps: [Logger],
   async useAsyncFactory(logger: Logger) {
     await postgresDatasource.initialize();
 
-    logger.info("Connected with typeorm to database: Postgres");
+    logger.info('Connected with typeorm to database: Postgres');
 
     return postgresDatasource;
   },
   hooks: {
-    $onDestroy(dataSource) {
-      return dataSource.isInitialized && dataSource.close();
-    }
-  }
+    $onDestroy(dataSource: DataSource) {
+      return dataSource.isInitialized && dataSource.destroy();
+    },
+  },
 });

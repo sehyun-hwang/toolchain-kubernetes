@@ -15,34 +15,40 @@
 ###############################################################################
 ###############################################################################
 
-ARG NODE_VERSION=20.11.0
+ARG NODE_VERSION=20
 
 FROM node:${NODE_VERSION}-alpine AS build
 WORKDIR /opt
 
-COPY package.json pnpm-lock.yaml tsconfig.json tsconfig.base.json tsconfig.node.json tsconfig.spec.json .barrels.json .swcrc ./
+COPY package.json pnpm-lock.yaml tsconfig.json tsconfig.*.json .barrels.json .swcrc ./
 
-RUN pnpm install --frozen-lockfile
+ENV COREPACK_INTEGRITY_KEYS=0
+RUN corepack enable pnpm \
+  && pnpm install --frozen-lockfile \
+  && pnpm store prune
 
 COPY ./src ./src
 
-RUN pnpm run build
+RUN pnpm build
 
 FROM node:${NODE_VERSION}-alpine AS runtime
 ENV WORKDIR /opt
 WORKDIR $WORKDIR
 
-RUN apk update && apk add build-base git curl
+# RUN apk add build-base git curl
 RUN npm install -g pm2
 
 COPY --from=build /opt .
 
-RUN pnpm install --frozen-lockfile --prod
+ENV COREPACK_INTEGRITY_KEYS=0
+RUN corepack enable pnpm \
+  && pnpm install --frozen-lockfile --prod \
+  && pnpm store prune
 
 COPY . .
 
 EXPOSE 8081
-ENV PORT 8081
-ENV NODE_ENV production
+ENV PORT=8081 \
+  NODE_ENV=production
 
 CMD ["pm2-runtime", "start", "processes.config.cjs", "--env", "production"]
