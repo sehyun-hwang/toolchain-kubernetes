@@ -1,5 +1,9 @@
 {
-  "directory": ["./src/controllers/rest"],
+  "directory": [
+    "src/entities",
+    "src/repositories",
+    "src/controllers/rest"
+  ],
   "exclude": [
     "**/__mock__",
     "**/__mocks__",

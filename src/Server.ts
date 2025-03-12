@@ -1,36 +1,33 @@
 import { join } from 'node:path';
 
 import { Configuration } from '@tsed/di';
-import { application } from '@tsed/platform-http';
+import { application, PlatformApplication } from '@tsed/platform-http';
 
-import '@tsed/platform-log-request'; // remove this import if you don&#x27;t want log request
-import '@tsed/platform-express'; // /!\ keep this import
+import '@tsed/platform-log-request';
 import '@tsed/ajv';
-import { config } from './config/index.js';
-import * as rest from './controllers/rest/index.js';
+import '@tsed/swagger';
+
+import { config } from './config';
+import {
+  HelloWorldController,
+  KeyValueController,
+} from './controllers/rest';
 
 @Configuration({
   ...config,
-  acceptMimes: ['application/json'],
+  // acceptMimes: ['application/json'],
   httpPort: process.env.PORT || 8083,
-  httpsPort: false, // CHANGE
+  httpsPort: false,
   disableComponentsScan: true,
   ajv: {
     returnsCoercedValues: true,
   },
   mount: {
-    '/rest': [
-      ...Object.values(rest),
+    '/': [
+      HelloWorldController,
+      KeyValueController,
     ],
   },
-  middlewares: [
-    'cors',
-    'cookie-parser',
-    'compression',
-    'method-override',
-    'json-parser',
-    { use: 'urlencoded-parser', options: { extended: true } },
-  ],
   views: {
     root: join(process.cwd(), '../views'),
     extensions: {
@@ -38,9 +35,20 @@ import * as rest from './controllers/rest/index.js';
     },
   },
   exclude: [
-    '**/*.spec.ts',
+    'src/**/*.spec.ts',
   ],
+  swagger: [{ path: '/docs' }],
+  express: {
+    bodyParser: {
+      json: {},
+    },
+  },
 })
 export class Server {
-  protected app = application();
+  protected app: PlatformApplication<Express.Application> = application();
+
+  // eslint-disable-next-line class-methods-use-this
+  $beforeRoutesInit() {
+    return null;
+  }
 }

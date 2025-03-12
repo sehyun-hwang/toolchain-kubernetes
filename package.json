@@ -1,15 +1,4 @@
 {
-  "name": "tsed",
-  "version": "1.0.0",
-  "description": "",
-  "scripts": {
-    "build": "barrels && swc src --out-dir dist -s  --strip-leading-paths",
-    "start": "barrels && node --enable-source-maps --import @swc-node/register/esm-register --watch src/index.ts",
-    "start.prod": "NODE_ENV=production node dist/index.js",
-    "test.unit": "NODE_ENV=test vitest run",
-    "test.watch": "NODE_ENV=test vitest",
-    "test.coverage": "NODE_ENV=test vitest run --coverage"
-  },
   "dependencies": {
     "@swc-node/register": "^1.10.9",
     "@swc/cli": "^0.6.0",
@@ -34,24 +23,21 @@
     "@tsed/platform-response-filter": "^8.5.4",
     "@tsed/platform-views": "^8.5.4",
     "@tsed/schema": "^8.5.4",
+    "@tsed/swagger": "^8.5.4",
     "ajv": "^8.17.1",
-    "body-parser": "^1.20.3",
-    "compression": "^1.8.0",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "cross-env": "^7.0.3",
     "dotenv": "^16.4.7",
     "dotenv-expand": "^12.0.1",
     "dotenv-flow": "^4.1.0",
-    "express": "^4.21.2",
-    "method-override": "^3.0.0",
     "pg": "^8.14.0",
     "typeorm": "^0.3.21",
     "typescript": "^5.8.2"
   },
+  "description": "",
   "devDependencies": {
+    "@tsed/cli": "^6.2.0",
     "@tsed/cli-plugin-typeorm": "6.2.0",
     "@tsed/cli-plugin-vitest": "6.2.0",
+    "@tsed/eslint-plugin": "^1.1.11",
     "@types/compression": "^1.7.5",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
@@ -61,16 +47,21 @@
     "@types/node": "^22.13.10",
     "@types/supertest": "^6.0.2",
     "@vitest/coverage-v8": "^3.0.8",
+    "globals": "^16.0.0",
     "supertest": "^7.0.0",
     "tslib": "^2.8.1",
     "unplugin-swc": "^1.5.1",
     "vitest": "^3.0.8"
   },
-  "tsed": {
-    "convention": "conv_default",
-    "architecture": "arc_default",
-    "packageManager": "pnpm",
-    "runtime": "node"
+  "name": "tsed",
+  "scripts": {
+    "build": "barrels && swc src --out-dir dist -s  --strip-leading-paths",
+    "start": "barrels && node --enable-source-maps --import @swc-node/register/esm-register --watch src/index.ts",
+    "start.prod": "NODE_ENV=production node dist/index.js",
+    "test.coverage": "NODE_ENV=test vitest run --coverage",
+    "test.unit": "NODE_ENV=test vitest run",
+    "test.watch": "NODE_ENV=test vitest"
   },
-  "type": "module"
+  "type": "module",
+  "version": "1.0.0"
 }

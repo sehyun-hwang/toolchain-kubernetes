@@ -3,16 +3,23 @@ import { injectable } from '@tsed/di';
 import { Logger } from '@tsed/logger';
 import { DataSource } from 'typeorm';
 
-export const PostgresDatasource = Symbol.for('PostgresDatasource');
-export type PostgresDatasource = DataSource;
+import * as entities from '../entities';
+
+export const PostgresDatasource = Symbol.for('PostgresDatasource') as unknown as Type<DataSource>;
+
+console.log('entities', entities);
+
 export const postgresDatasource = new DataSource({
   type: 'postgres',
-  entities: [],
+  entities,
   host: 'ep-fragrant-king-057290.ap-southeast-1.aws.neon.tech',
-  port: 5432,
   username: 'hwanghyun3',
   // password: 'test',
   database: 'tsed',
+  ssl: true,
+
+  synchronize: true,
+  logging: true,
 });
 
 injectable<Type<DataSource>>(PostgresDatasource, {
