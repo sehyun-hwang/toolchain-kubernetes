@@ -7,11 +7,11 @@ import '@tsed/platform-log-request';
 import '@tsed/ajv';
 import '@tsed/swagger';
 
-import { config } from './config';
+import { config } from './config/index.js';
 import {
   HelloWorldController,
   KeyValueController,
-} from './controllers/rest';
+} from './controllers/rest/index.js';
 
 @Configuration({
   ...config,

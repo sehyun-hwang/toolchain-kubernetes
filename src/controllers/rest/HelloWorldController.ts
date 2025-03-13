@@ -1,10 +1,9 @@
-import { Type } from '@tsed/core';
 import { Controller, Inject } from '@tsed/di';
 import {
   Description, Get, Returns, Summary,
 } from '@tsed/schema';
 
-import HelloWorldService from './HelloWorldService';
+import HelloWorldService from './HelloWorldService.js';
 
 @Controller('/hello-world')
 export class HelloWorldController {

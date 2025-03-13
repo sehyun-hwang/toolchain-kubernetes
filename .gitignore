@@ -35,10 +35,10 @@ node_modules
 typings/
 
 # Typescript
-/**/*.js
-/**/*.js.map
-test/**/*.js
-test/**/*.js.map
+# /**/*.js
+# /**/*.js.map
+# test/**/*.js
+# test/**/*.js.map
 
 # Test
 /.tmp

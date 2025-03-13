@@ -1,6 +1,6 @@
 import { Inject } from '@tsed/di';
 
-import { KeyValueRepository } from '../../repositories';
+import { KeyValueRepository } from '../../repositories/KeyValue.js';
 
 export default class KeyValueService {
   @Inject(KeyValueRepository)

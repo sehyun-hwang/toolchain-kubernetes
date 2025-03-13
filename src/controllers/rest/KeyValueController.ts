@@ -5,9 +5,9 @@ import {
   Get, Post, Put,
 } from '@tsed/schema';
 
-import type { KeyValue } from '../../schema/KeyValue';
+import type { KeyValue } from '../../schema/KeyValue.js';
 
-import KeyValueService from './KeyValueService';
+import KeyValueService from './KeyValueService.js';
 
 @Controller('/kv')
 export class KeyValueController {

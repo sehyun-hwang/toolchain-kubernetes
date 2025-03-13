@@ -1,7 +1,7 @@
 import { Inject, Service } from '@tsed/di';
 import { DataSource } from 'typeorm';
 
-import { PostgresDatasource } from '../../datasources/PostgresDatasource';
+import { PostgresDatasource } from '../../datasources/PostgresDatasource.js';
 
 @Service()
 export default class HelloWorldService {

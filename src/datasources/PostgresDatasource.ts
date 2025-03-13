@@ -3,7 +3,7 @@ import { injectable } from '@tsed/di';
 import { Logger } from '@tsed/logger';
 import { DataSource } from 'typeorm';
 
-import * as entities from '../entities';
+import * as entities from '../entities/index.js';
 
 export const PostgresDatasource = Symbol.for('PostgresDatasource') as unknown as Type<DataSource>;
 

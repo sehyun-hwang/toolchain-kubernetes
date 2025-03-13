@@ -32,7 +32,7 @@ COPY ./src ./src
 RUN pnpm build
 
 FROM node:${NODE_VERSION}-alpine AS runtime
-ENV WORKDIR /opt
+ENV WORKDIR=/opt
 WORKDIR $WORKDIR
 
 # RUN apk add build-base git curl
@@ -51,4 +51,4 @@ EXPOSE 8081
 ENV PORT=8081 \
   NODE_ENV=production
 
-CMD ["pm2-runtime", "start", "processes.config.cjs", "--env", "production"]
+CMD ["pm2-runtime", "start", "ecosystem.config.cjs", "--env", "production"]

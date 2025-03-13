@@ -1,6 +1,6 @@
 import { Property, Required } from '@tsed/schema';
 
-import type IKeyValue from '../interface/KeyValue';
+import type IKeyValue from '../interface/KeyValue.js';
 
 export class KeyValue implements IKeyValue {
   @Property()

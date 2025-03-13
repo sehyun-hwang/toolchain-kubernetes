@@ -9,3 +9,5 @@ services:
         - no_proxy
     ports:
       - "8081:8081"
+    environment:
+      - PGPASSWORD=${PGPASSWORD:?error}
