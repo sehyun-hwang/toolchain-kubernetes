@@ -2,6 +2,7 @@ import { join } from 'node:path';
 
 import { Configuration } from '@tsed/di';
 import { application, PlatformApplication } from '@tsed/platform-http';
+import { pinoHttp } from 'pino-http';
 
 import '@tsed/platform-log-request';
 import '@tsed/ajv';
@@ -47,8 +48,8 @@ import {
 export class Server {
   protected app: PlatformApplication<Express.Application> = application();
 
-  // eslint-disable-next-line class-methods-use-this
   $beforeRoutesInit() {
+    this.app.use(pinoHttp());
     return null;
   }
 }

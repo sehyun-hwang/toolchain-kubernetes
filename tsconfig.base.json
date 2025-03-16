@@ -27,6 +27,7 @@
     "noResolve": false,
     "preserveConstEnums": true,
     "sourceMap": true,
-    "noEmit": true
+    "noEmit": true,
+    "exactOptionalPropertyTypes": true,
   }
 }

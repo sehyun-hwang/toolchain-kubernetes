@@ -1,6 +1,8 @@
-import { $log } from '@tsed/logger';
 import { PlatformExpress } from '@tsed/platform-express';
 
+import { bootstrapLogger as logger } from './config/logger/pino.js';
+import configureLogging from './config/logger/tsed.js';
+import start from './open-telemetry.js';
 import { Server } from './Server.js';
 
 const SIG_EVENTS = [
@@ -20,15 +22,24 @@ const SIG_EVENTS = [
 ];
 
 try {
+  start();
+} catch (error) {
+  logger.error(error);
+}
+
+try {
+  configureLogging();
   const platform = await PlatformExpress.bootstrap(Server);
+  logger.info('Platform bootstrap completed');
   await platform.listen();
+  logger.info('Platform listening');
 
   SIG_EVENTS.forEach(evt => process.on(evt, () => platform.stop()));
 
   ['uncaughtException', 'unhandledRejection'].forEach(evt => process.on(evt, async (error: Error) => {
-    $log.error({ event: 'SERVER_' + evt.toUpperCase(), message: error.message, stack: error.stack });
+    logger.error({ event: 'SERVER_' + evt.toUpperCase(), message: error.message, stack: error.stack });
     await platform.stop();
   }));
 } catch (error) {
-  $log.error({ event: 'SERVER_BOOTSTRAP_ERROR', error });
+  logger.error({ event: 'SERVER_BOOTSTRAP_ERROR', error });
 }
