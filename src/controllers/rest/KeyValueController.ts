@@ -5,7 +5,7 @@ import {
   Get, Post, Put,
 } from '@tsed/schema';
 
-import type { KeyValue } from '../../schema/KeyValue.js';
+import { KeyValue } from '../../entities/KeyValue.js';
 
 import KeyValueService from './KeyValueService.js';
 
@@ -29,7 +29,7 @@ export class KeyValueController {
 
   @Post('/')
   post(
-    @BodyParams() entries: KeyValue[],
+    @BodyParams(KeyValue) entries: KeyValue[],
   ) {
     return Promise.allSettled(
       entries.map(({ key, value }) => this.keyValueService.set(key, value)),

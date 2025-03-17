@@ -1,29 +1,26 @@
-import { Inject } from '@tsed/di';
+import { Service } from '@tsed/di';
 
-import { KeyValueRepository } from '../../repositories/KeyValue.js';
+import { KeyValue } from '../../entities/KeyValue.js';
+import RepositoryService from '../../repositories/index.js';
 
-export default class KeyValueService {
-  @Inject(KeyValueRepository)
-  protected repo: KeyValueRepository;
+@Service()
+export default class KeyValueService extends RepositoryService<KeyValue> {
+  klass = KeyValue;
 
   async set(key: string, value: string): Promise<void> {
-    await this.repo.save({ key, value });
+    await this.repository.upsert({ key, value });
   }
 
-  async get(key: string): Promise<string | null> {
-    const entry = await this.repo.findOneBy({ key });
+  async get(key: string) {
+    const entry = await this.repository.findOne({ key });
     return entry ? entry.value : null;
   }
 
-  async delete(key: string): Promise<void> {
-    await this.repo.delete({ key });
+  getAll() {
+    return this.repository.findAll();
   }
 
-  async getAll(): Promise<Record<string, string>> {
-    const entries = await this.repo.find();
-    return entries.reduce<Record<string, string>>((acc, entry) => {
-      acc[entry.key] = entry.value;
-      return acc;
-    }, {});
+  async delete(key: string) {
+    await this.repository.nativeDelete({ key });
   }
 }

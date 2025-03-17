@@ -1,12 +1,18 @@
-import { Column, Entity, PrimaryColumn } from 'typeorm';
-
-import type IKeyValue from '../interface/KeyValue.js';
+import {
+  BaseEntity, Property as Column, Entity,
+  PrimaryKey,
+} from '@mikro-orm/core';
+import { MaxLength, Property, Required } from '@tsed/schema';
 
 @Entity()
-export class KeyValue implements IKeyValue {
-  @PrimaryColumn()
+export class KeyValue extends BaseEntity {
+  @PrimaryKey()
+  @Required()
+  @Property()
   key: string;
 
-  @Column('text')
+  @Column()
+  @MaxLength(100)
+  @Required()
   value: string;
 }

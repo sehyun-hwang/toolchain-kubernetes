@@ -1,14 +1,18 @@
-import { join } from 'node:path';
+/* eslint-disable max-classes-per-file */
+/* eslint sort-keys: "error" */
 
+import { join } from 'path';
+
+import '@tsed/ajv';
+import '@tsed/swagger';
 import { Configuration } from '@tsed/di';
+import { MikroOrmModule } from '@tsed/mikro-orm';
 import { application, PlatformApplication } from '@tsed/platform-http';
 import { pinoHttp } from 'pino-http';
 
-import '@tsed/platform-log-request';
-import '@tsed/ajv';
-import '@tsed/swagger';
-
 import { config } from './config/index.js';
+import { requestLogger } from './config/logger/pino.js';
+import mkiroOrmConfig from './config/mikro-orm.js';
 import {
   HelloWorldController,
   KeyValueController,
@@ -17,39 +21,48 @@ import {
 @Configuration({
   ...config,
   // acceptMimes: ['application/json'],
-  httpPort: process.env.PORT || 8083,
-  httpsPort: false,
-  disableComponentsScan: true,
   ajv: {
     returnsCoercedValues: true,
   },
+  disableComponentsScan: true,
+  exclude: [
+    'src/**/*.spec.ts',
+  ],
+  express: {
+    bodyParser: {
+      json: {},
+    },
+  },
+  httpPort: process.env.PORT || 8083,
+  httpsPort: false,
+  imports: [MikroOrmModule],
+  mikroOrm: [mkiroOrmConfig],
   mount: {
     '/': [
       HelloWorldController,
       KeyValueController,
     ],
   },
+  swagger: [{ path: '/docs' }],
   views: {
-    root: join(process.cwd(), '../views'),
     extensions: {
       ejs: 'ejs',
     },
-  },
-  exclude: [
-    'src/**/*.spec.ts',
-  ],
-  swagger: [{ path: '/docs' }],
-  express: {
-    bodyParser: {
-      json: {},
-    },
+    root: join(process.cwd(), '../views'),
   },
 })
 export class Server {
   protected app: PlatformApplication<Express.Application> = application();
 
   $beforeRoutesInit() {
-    this.app.use(pinoHttp());
+    this.app.use(pinoHttp({
+      customProps(req: Express.Request, _res: Express.Response) {
+        return {
+          httpVersion: req.httpVersion,
+        };
+      },
+      logger: requestLogger,
+    }));
     return null;
   }
 }

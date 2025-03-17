@@ -1,21 +1,17 @@
-import { Inject, Service } from '@tsed/di';
-import { DataSource } from 'typeorm';
-
-import { PostgresDatasource } from '../../datasources/PostgresDatasource.js';
+import type { MikroORM } from '@mikro-orm/core';
+import { type OnInit, Service } from '@tsed/di';
+import { Orm } from '@tsed/mikro-orm';
 
 @Service()
-export default class HelloWorldService {
-  @Inject(PostgresDatasource)
-  protected dataSource: DataSource;
+export default class HelloWorldService implements OnInit {
+  @Orm()
+  readonly orm: MikroORM;
 
   $onInit() {
-    if (this.dataSource.isInitialized) {
-      console.log('INIT');
-    }
+    console.log('$onInit', this);
   }
 
   ping() {
-    return this.dataSource.createQueryRunner().manager
-      .query('SELECT 1');
+    return this.orm.checkConnection();
   }
 }

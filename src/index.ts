@@ -40,6 +40,6 @@ try {
     logger.error({ event: 'SERVER_' + evt.toUpperCase(), message: error.message, stack: error.stack });
     await platform.stop();
   }));
-} catch (error) {
-  logger.error({ event: 'SERVER_BOOTSTRAP_ERROR', error });
+} catch (err) {
+  logger.error({ event: 'SERVER_BOOTSTRAP_ERROR', err });
 }

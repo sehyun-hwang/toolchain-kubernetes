@@ -1,7 +1,6 @@
 {
   "directory": [
     "src/entities",
-    "src/repositories",
     "src/controllers/rest"
   ],
   "exclude": [
