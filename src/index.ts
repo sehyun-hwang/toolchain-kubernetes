@@ -1,8 +1,8 @@
-import { PlatformExpress } from '@tsed/platform-express';
-
-import { bootstrapLogger as logger } from './config/logger/pino.js';
+/* eslint-disable import/order */
+import { bootstrapLogger as logger } from './config/logger/index.js';
 import configureLogging from './config/logger/tsed.js';
 import start from './open-telemetry.js';
+
 import { Server } from './Server.js';
 
 const SIG_EVENTS = [
@@ -23,12 +23,9 @@ const SIG_EVENTS = [
 
 try {
   start();
-} catch (error) {
-  logger.error(error);
-}
-
-try {
   configureLogging();
+
+  const { PlatformExpress } = await import('@tsed/platform-express');
   const platform = await PlatformExpress.bootstrap(Server);
   logger.info('Platform bootstrap completed');
   await platform.listen();

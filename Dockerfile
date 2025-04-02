@@ -45,7 +45,7 @@ RUN corepack enable pnpm \
   && pnpm install --frozen-lockfile --prod \
   && pnpm store prune
 
-COPY . .
+COPY ecosystem.config.cjs .
 
 EXPOSE 8081
 ENV PORT=8081 \

@@ -1,61 +1,66 @@
 import { createWriteStream } from 'fs';
 
 import { diag, DiagLogLevel } from '@opentelemetry/api';
-import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { HostMetrics } from '@opentelemetry/host-metrics';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+import { PgInstrumentation } from '@opentelemetry/instrumentation-pg';
+import { JsonTraceSerializer } from '@opentelemetry/otlp-transformer';
 import { Resource } from '@opentelemetry/resources';
-import {
-  BatchLogRecordProcessor,
-  ConsoleLogRecordExporter,
-  SimpleLogRecordProcessor,
-} from '@opentelemetry/sdk-logs';
 import {
   InMemoryMetricExporter,
   PeriodicExportingMetricReader,
 } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
+import type { ReadableSpan } from '@opentelemetry/sdk-trace-node';
 import { FileTraceExporter } from 'opentelemetry-exporter-trace-otlp-file';
 
 import { otelLogger } from './config/logger/open-telemetry.js';
 import { resourceAttributes } from './config/open-telemetry.js';
 
-const DEBUG = true as boolean;
+class PatchedFileTraceExporter extends FileTraceExporter {
+  // eslint-disable-next-line class-methods-use-this
+  convert(spans: ReadableSpan[]) {
+    const arrayBuffer = JsonTraceSerializer.serializeRequest(spans);
+    if (!arrayBuffer)
+      return {};
+    return JSON.parse(Buffer.from(arrayBuffer).toString()) as object;
+  }
+}
+
 const {
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
 } = process.env;
+
+diag.setLogger(otelLogger, DiagLogLevel.VERBOSE);
 
 const inMemoryMetricExporter = new InMemoryMetricExporter(1);
 const fileStream = createWriteStream('open-telemetry-metrics.log', { flags: 'a' });
-if (DEBUG)
-  diag.setLogger(otelLogger, DiagLogLevel.VERBOSE);
 
 const sdk = new NodeSDK({
   resource: new Resource(resourceAttributes),
   traceExporter: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ? new OTLPTraceExporter({
     url: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-  }) : new FileTraceExporter({ filePath: 'open-telemetry-traces.log' }),
+  }) // : new ConsoleSpanExporter(),
+    : new PatchedFileTraceExporter({ filePath: 'open-telemetry-traces.log' }),
   metricReader: new PeriodicExportingMetricReader({
     exporter: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT ? new OTLPMetricExporter({
       url: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
     }) : inMemoryMetricExporter,
     exportIntervalMillis: 10000,
   }),
-  logRecordProcessors: [
-    new SimpleLogRecordProcessor(new ConsoleLogRecordExporter()),
-    ...(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
-      ? [new BatchLogRecordProcessor(new OTLPLogExporter({
-        url: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
-      }))] : []),
-  ],
   instrumentations: [
+    new PgInstrumentation(),
     new HttpInstrumentation(),
-    new ExpressInstrumentation(),
+    /** @link https://github.com/open-telemetry/opentelemetry-js-contrib/issues/2435 */
+    new ExpressInstrumentation({
+      requestHook() {
+        console.log('requestHook');
+      },
+    }),
   ],
 });
 

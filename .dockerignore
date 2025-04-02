@@ -1,9 +1,5 @@
 node_modules
-dist
-*.log
+**/*.spec.ts
 
-Dockerfile
-docker-compose.yml
 .env.local
 .env.development
-**/*.spec.ts

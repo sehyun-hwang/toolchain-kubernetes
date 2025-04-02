@@ -1,4 +1,3 @@
-/* eslint-disable max-classes-per-file */
 /* eslint sort-keys: "error" */
 
 import { join } from 'path';
@@ -11,7 +10,7 @@ import { application, PlatformApplication } from '@tsed/platform-http';
 import { pinoHttp } from 'pino-http';
 
 import { config } from './config/index.js';
-import { requestLogger } from './config/logger/pino.js';
+import { requestLogger } from './config/logger/index.js';
 import mkiroOrmConfig from './config/mikro-orm.js';
 import {
   HelloWorldController,
@@ -56,7 +55,7 @@ export class Server {
 
   $beforeRoutesInit() {
     this.app.use(pinoHttp({
-      customProps(req: Express.Request, _res: Express.Response) {
+      customProps(req: Express.Request & { httpVersion: string; }, _res: Express.Response) {
         return {
           httpVersion: req.httpVersion,
         };

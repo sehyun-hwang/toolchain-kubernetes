@@ -1,6 +1,7 @@
 /* eslint-disable class-methods-use-this */
 /* eslint-disable max-classes-per-file */
 
+import '@tsed/logger-connect';
 import { OverrideProvider } from '@tsed/di';
 import { BaseLayout, Layout, type LogEvent } from '@tsed/logger';
 import { $log } from '@tsed/logger';
@@ -9,7 +10,6 @@ import { PlatformLogMiddleware } from '@tsed/platform-log-middleware';
 import { Context } from '@tsed/platform-params';
 import { type Logger, pino } from 'pino';
 
-import '@tsed/logger-connect';
 import { loggerOptions } from './pino.js';
 
 @OverrideProvider(PlatformLogMiddleware)
@@ -55,6 +55,10 @@ class _ObjectLayout extends BaseLayout {
   }
 }
 
+function format(data: string[]) {
+  return data.join(' ').replaceAll('%s', '%o');
+}
+
 class PinoConnectLogger implements Required<ConnectLogger> {
   logger: Logger;
 
@@ -63,44 +67,44 @@ class PinoConnectLogger implements Required<ConnectLogger> {
       ...loggerOptions,
       name: 'default',
     });
-    this.logger.info('\x1B[33m"Color test"\x1B[39m');
+    this.logger.info('\x1B[33m%s\x1B[39m', 'Color test');
     this.logger.error(new Error('Error test'));
   }
 
   info({
     name, time, data, ...obj
   }: PinoLogEvent) {
-    this.logger.info({ name, time }, data.join(' '), obj);
+    this.logger.info({ name, time }, format(data), obj);
   }
 
   warn({
     name, time, data, ...obj
   }: PinoLogEvent) {
-    this.logger.warn({ name, time }, data.join(' '), obj);
+    this.logger.warn({ name, time }, format(data), obj);
   }
 
   debug({
     name, time, data, ...obj
   }: PinoLogEvent) {
-    this.logger.debug({ name, time }, data.join(' '), obj);
+    this.logger.debug({ name, time }, format(data), obj);
   }
 
   trace({
     name, time, data, ...obj
   }: PinoLogEvent) {
-    this.logger.trace({ name, time }, data.join(' '), obj);
+    this.logger.trace({ name, time }, format(data), obj);
   }
 
   error({
     name, time, data, ...obj
   }: PinoLogEvent) {
-    this.logger.error({ name, time }, data.join(' '), obj);
+    this.logger.error({ name, time }, format(data), obj);
   }
 
   fatal({
     name, time, data, ...obj
   }: PinoLogEvent) {
-    this.logger.fatal({ name, time }, data.join(' '), obj);
+    this.logger.fatal({ name, time }, format(data), obj);
   }
 }
 
