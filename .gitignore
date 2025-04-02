@@ -146,3 +146,4 @@ dist
 /pgbouncer/target
 /pgbouncer/bundle.pem
 /pgbouncer/userlist.txt
+/pgbouncer/k3s.service.env
