@@ -11,3 +11,43 @@ services:
       - "8081:8081"
     environment:
       - PGPASSWORD=${PGPASSWORD:?error}
+
+  iam-pgbouncer:
+    build: pgbouncer
+    ports:
+      - 6432:6432
+    env_file: pgbouncer.env
+    user: root
+    volumes:
+      - ~/.aws:/root/.aws
+
+  pgbouncer:
+    image: edoburu/pgbouncer
+    working_dir: /etc/pgbouncer
+    environment:
+      LISTEN_PORT: "6432"
+      AUTH_TYPE: trust
+      SERVER_TLS_SSLMODE: verify-ca
+      SERVER_TLS_CA_FILE: cert/bundle.pem # dev: userlist.sh
+      # SERVER_TLS_CA_FILE: bundle.pem # prod: ./userlist
+      VERBOSE: "3"
+    volumes:
+      - pgbouncer-cert:/etc/pgbouncer/cert
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
+
+  kube-apiserver-proxy:
+    image: nginx
+    ports:
+      - 8080:80
+    volumes:
+      - ./kube-apiserver-proxy/entrypoint.d/55-mock-ca.sh:/docker-entrypoint.d/55-mock-ca.sh
+      - ./kube-apiserver-proxy/entrypoint.d/59-certificate.sh:/docker-entrypoint.d/59-certificate.sh
+      - ./kube-apiserver-proxy/proxy-pass.conf.template:/etc/nginx/templates/proxy-pass.conf.template
+      - ./kube-apiserver-proxy/nginx.conf:/etc/nginx/conf.d/default.conf
+    environment:
+      KUBERNETES_SERVICE_HOST: 127.0.0.1
+      KUBERNETES_SERVICE_PORT_HTTPS: 443
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+
+volumes:
+  pgbouncer-cert:
