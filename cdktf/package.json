@@ -29,7 +29,7 @@
     "@pulumi/docker-build": "^0.0.10",
     "@smithy/config-resolver": "^4.1.0",
     "@smithy/node-config-provider": "^4.0.2",
-    "aws-cdk-lib": "^2.186.0",
+    "aws-cdk-lib": "^2.187.0",
     "cdktf": "^0.20.0",
     "constructs": "^10.4.2",
     "write-file-atomic": "^6.0.0",
