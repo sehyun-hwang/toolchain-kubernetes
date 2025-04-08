@@ -25,7 +25,6 @@ RUN mv /entrypoint.sh /upstream-entrypoint.sh
 WORKDIR /etc/pgbouncer
 COPY --from=build /mnt/target/release/pgbouncer-userlist ./
 COPY entrypoint.sh /
-COPY kine-entrypoint.sh /bin/
 COPY daemon.ini ./
 
 USER postgres

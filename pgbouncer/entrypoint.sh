@@ -11,4 +11,5 @@ pgbouncer pgbouncer.ini -d
 while sleep 895; do
   date
   "$@"
+  kill -HUP $(cat pgbouncer.pid)
 done
