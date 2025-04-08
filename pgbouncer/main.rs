@@ -71,7 +71,7 @@ async fn write_userlist_txt(credentials: Credentials) -> Result<String, Box<dyn 
     if Path::new("k3s.service.env").exists() {
         let db_name = env::var("DB_NAME").expect("DB_NAME env must be set");
         let mut k3_env = File::create("k3s.service.env")?;
-        let mut url = Url::parse(&format!("postgresql://{db_user}@{db_host}/{db_name}?sslmode=verify-ca&sslrootcert=/etc/rancher/k3s/rds.pem").to_string())?;
+        let mut url = Url::parse(&format!("postgresql://{db_user}@{db_host}/{db_name}?sslmode=verify-ca&sslrootcert=bundle.pem").to_string())?;
         url.query_pairs_mut().append_pair("password", &token);
 
         writeln!(k3_env, "K3S_DATASTORE_ENDPOINT=\"{url}\"")?;
@@ -90,17 +90,21 @@ async fn _main() -> Result<(), Box<dyn Error>> {
         .await?;
     println!("Loaded AWS credential {:?}", credentials);
     let region = write_userlist_txt(credentials).await?;
-
-    let bundle = reqwest::get(format!(
-        "https://truststore.pki.rds.amazonaws.com/{region}/{region}-bundle.pem"
-    ))
-    .await?
-    .text()
-    .await?;
+    let ca_bytes = match env::var("DB_CA_BUNDLE") {
+        Ok(val) => val.into_bytes(),
+        Err(_) => reqwest::get(format!(
+            "https://truststore.pki.rds.amazonaws.com/{region}/{region}-bundle.pem"
+        ))
+        .await?
+        .bytes()
+        .await?
+        .to_vec(),
+    };
 
     let mut bundle_file = File::create("bundle.pem")?;
-    bundle_file.write_all(bundle.as_bytes())?;
-    println!("Downloaded and saved trust bundle to bundle.pem");
+    bundle_file
+        .write_all(&ca_bytes)
+        .expect("Downloaded and saved trust bundle to bundle.pem");
 
     Ok(())
 }
