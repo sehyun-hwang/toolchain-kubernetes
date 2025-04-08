@@ -20,6 +20,7 @@
     "node": ">=18.0"
   },
   "dependencies": {
+    "@aws-sdk/client-sts": "^3.777.0",
     "@cdktf/aws-cdk": "^0.13.53",
     "@cdktf/provider-aws": "^19.59.0",
     "@cdktf/provider-local": "^10.1.1",
@@ -27,11 +28,13 @@
     "@smithy/node-config-provider": "^4.0.2",
     "aws-cdk-lib": "^2.186.0",
     "cdktf": "^0.20.0",
-    "constructs": "^10.4.2"
+    "constructs": "^10.4.2",
+    "write-file-atomic": "^6.0.0"
   },
   "devDependencies": {
     "@swc-node/register": "^1.10.10",
     "@types/node": "^22.13.14",
+    "@types/write-file-atomic": "^4.0.3",
     "typescript": "^5.8.2"
   }
 }

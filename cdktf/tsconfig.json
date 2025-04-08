@@ -26,7 +26,8 @@
     "skipLibCheck": true
   },
   "include": [
-    "**/*.ts"
+    "**/*.ts",
+    "docker-login.js"
   ],
   "exclude": [
     "node_modules",
