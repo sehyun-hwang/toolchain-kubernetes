@@ -1,4 +1,5 @@
 /* eslint-disable no-new, max-classes-per-file */
+import { homedir } from 'os';
 import { join, resolve } from 'path';
 
 import { AwsTerraformAdapter } from '@cdktf/aws-cdk';
@@ -7,19 +8,23 @@ import { AwsProvider } from '@cdktf/aws-cdk/lib/aws/provider/index.js';
 import { findMapping, registerMapping } from '@cdktf/aws-cdk/lib/mapping/index.js';
 import { EcrRepository } from '@cdktf/provider-aws/lib/ecr-repository/index.js';
 import { IamAccessKey } from '@cdktf/provider-aws/lib/iam-access-key/index.js';
+import { HelmProvider } from '@cdktf/provider-helm/lib/provider/index.js';
+import { Release } from '@cdktf/provider-helm/lib/release/index.js';
+import * as kubernetes from '@cdktf/provider-kubernetes';
 import { DataLocalFile } from '@cdktf/provider-local/lib/data-local-file/index.js';
 import { File } from '@cdktf/provider-local/lib/file/index.js';
 import { LocalProvider } from '@cdktf/provider-local/lib/provider/index.js';
-import { Platform, type ImageArgs } from '@pulumi/docker-build';
+import { type ImageArgs, Platform } from '@pulumi/docker-build';
 import { NODE_REGION_CONFIG_OPTIONS } from '@smithy/config-resolver';
 import { loadConfig } from '@smithy/node-config-provider';
 import { Repository } from 'aws-cdk-lib/aws-ecr';
 import { User } from 'aws-cdk-lib/aws-iam';
 import { DatabaseInstance } from 'aws-cdk-lib/aws-rds';
+import * as cdk from 'aws-cdk-lib/core';
 import * as cdktf from 'cdktf/lib/index.js';
 import { invokeAspects } from 'cdktf/lib/synthesize/synthesizer.js';
 import { Construct } from 'constructs';
-import * as cdk from 'aws-cdk-lib/core';
+import { stringify } from 'yaml';
 
 const region = await loadConfig(NODE_REGION_CONFIG_OPTIONS)();
 console.log({ region });
@@ -132,7 +137,7 @@ class ImagesStack extends cdktf.TerraformStack {
     });
     buildxBake.addTarget('coreos-k3s', {
       context: 'coreos-k3s',
-      platforms: [Platform.Linux_arm64,],
+      platforms: [Platform.Linux_arm64],
     });
     const bakeFileContent = buildxBake.generateBakeFile();
     console.log('docker-bake.json', bakeFileContent);
@@ -219,9 +224,12 @@ class DeploymentStack extends cdktf.TerraformStack {
     const grant = database.grantConnect(user, 'k3s');
     grant.principalStatements[0].addResources(
       cdk.Arn.format({
-        ...cdk.Arn.split(grant.principalStatements[0].resources[0], cdk.ArnFormat.COLON_RESOURCE_NAME),
+        ...cdk.Arn.split(
+          grant.principalStatements[0].resources[0],
+          cdk.ArnFormat.COLON_RESOURCE_NAME,
+        ),
         region: 'us-west-2',
-      })
+      }),
     );
 
     const buckets = [];
@@ -257,6 +265,97 @@ class DeploymentStack extends cdktf.TerraformStack {
   }
 }
 
+class ChartsStack extends cdktf.TerraformStack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+    new HelmProvider(this, 'HelmProvider', {
+      kubernetes: {
+        configPath: join(homedir(), '.kube/config'),
+      },
+    });
+
+    const cloudflareApitoken = new cdktf.TerraformVariable(this, 'CloudflareApiToken', {
+      type: 'string',
+      sensitive: true,
+    });
+
+    const cloudflareTunnelIngress = new Release(this, 'CloudflareTunnelIngress', {
+      name: 'cloudflare-tunnel-ingress',
+      repository: 'https://helm.strrl.dev',
+      chart: 'cloudflare-tunnel-ingress-controller',
+      values: [stringify({
+        cloudflare: {
+          accountId: 'd73ec299757657bcc3c7247c55194ab9',
+          tunnelName: 'k3s',
+          apiToken: cloudflareApitoken.stringValue,
+        },
+      })],
+    });
+
+    const httpbin = new Release(this, 'HttpBin', {
+      name: 'httpbin',
+      repository: 'https://estahn.github.io/charts',
+      chart: 'httpbingo',
+      values: [stringify({
+        image: {
+          tag: 'latest',
+        },
+        ingress: {
+          enabled: true,
+          className: 'cloudflare-tunnel',
+          hosts: [{
+            host: 'httpbin.3091977.xyz',
+            paths: [{
+              path: '/',
+              pathType: 'ImplementationSpecific',
+            }],
+          }],
+        },
+      })],
+    });
+
+    const httpbinNginx = new Release(this, 'HttpBinNginx', {
+      name: 'httpbin-nginx',
+      chart: 'nginx',
+      repository: 'oci://registry-1.docker.io/bitnamicharts',
+      values: [stringify({
+        service: {
+          type: 'ClusterIP',
+        },
+        serverBlock: `server {
+  listen 0.0.0.0:8080;
+  location / {
+    proxy_pass http://httpbin-httpbingo/anything/;
+  }
+}`,
+      })],
+      dependsOn: [httpbin],
+    });
+
+    new Release(this, 'NginxIngress', {
+      name: 'nginx-ingress',
+      repository: 'https://kubernetes.github.io/ingress-nginx',
+      chart: 'ingress-nginx',
+      values: [stringify({
+        controller: {
+          service: {
+            type: 'ClusterIP',
+          },
+          config: {
+            'whitelist-source-range': '10.42.0.0/16',
+            'blacklist-source-range': 'all',
+          },
+          extraArgs: {
+            'default-backend-service': 'default/httpbin-nginx',
+            'ingress-class': 'cloudflare-tunnel',
+          },
+        },
+      })],
+      dependsOn: [httpbinNginx, cloudflareTunnelIngress],
+    });
+  }
+}
+
 const app = new cdktf.App();
 const imagesStack = new ImagesStack(app, 'ImagesStack');
 const { metadataFilePath } = imagesStack;
@@ -270,5 +369,7 @@ new cdktf.CloudBackend(deploymentStack, {
   organization: 'sehyun-hwang',
   workspaces: new cdktf.NamedCloudWorkspace('k3s-playground'),
 });
+
+const chartsStack = new ChartsStack(app, 'ChartsStack');
 
 app.synth();

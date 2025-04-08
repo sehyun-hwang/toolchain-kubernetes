@@ -23,13 +23,17 @@
     "@aws-sdk/client-sts": "^3.777.0",
     "@cdktf/aws-cdk": "^0.13.53",
     "@cdktf/provider-aws": "^19.59.0",
+    "@cdktf/provider-helm": "^10.5.0",
+    "@cdktf/provider-kubernetes": "^11.11.0",
     "@cdktf/provider-local": "^10.1.1",
+    "@pulumi/docker-build": "^0.0.10",
     "@smithy/config-resolver": "^4.1.0",
     "@smithy/node-config-provider": "^4.0.2",
     "aws-cdk-lib": "^2.186.0",
     "cdktf": "^0.20.0",
     "constructs": "^10.4.2",
-    "write-file-atomic": "^6.0.0"
+    "write-file-atomic": "^6.0.0",
+    "yaml": "^2.7.1"
   },
   "devDependencies": {
     "@swc-node/register": "^1.10.10",
