@@ -5,3 +5,4 @@ cdktf.log
 .gen
 .terraform
 tsconfig.tsbuildinfo
+.env

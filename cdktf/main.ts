@@ -11,6 +11,7 @@ import { IamAccessKey } from '@cdktf/provider-aws/lib/iam-access-key/index.js';
 import { HelmProvider } from '@cdktf/provider-helm/lib/provider/index.js';
 import { Release } from '@cdktf/provider-helm/lib/release/index.js';
 import * as kubernetes from '@cdktf/provider-kubernetes';
+import { KubernetesProvider } from '@cdktf/provider-kubernetes/lib/provider/index.js';
 import { DataLocalFile } from '@cdktf/provider-local/lib/data-local-file/index.js';
 import { File } from '@cdktf/provider-local/lib/file/index.js';
 import { LocalProvider } from '@cdktf/provider-local/lib/provider/index.js';
@@ -88,7 +89,7 @@ class BuildxBake extends Construct {
 
     args.platforms.forEach(platform => {
       const arch = platform.split('/')[1];
-      const tags = [...(args.tags as string[] || [])];
+      const tags = [...(args.tags as string[] | undefined || [])];
       tags.push(repository.repositoryUrl + ':' + arch);
 
       const targetName = name + '-' + arch;
@@ -127,8 +128,8 @@ class ImagesStack extends cdktf.TerraformStack {
 
     const { authorizationToken } = new DataAwsEcrAuthorizationToken(this, 'DataAwsEcrAuthorizationToken');
     const buildxBake = new BuildxBake(this, 'BuildxBake');
-    buildxBake.addTarget('kube-apiserver-proxy', {
-      context: 'kube-apiserver-proxy',
+    buildxBake.addTarget('tsed', {
+      context: 'tsed',
       platforms: [Platform.Linux_arm64, Platform.Linux_amd64],
     });
     buildxBake.addTarget('iam-pgbouncer', {
@@ -156,7 +157,7 @@ class ImagesStack extends cdktf.TerraformStack {
     const dockerLoginExec = new cdktf.DataResource(this, 'DockerLoginExec', {
       provisioners: [{
         type: 'local-exec',
-        command: 'node ' + resolve('docker-login.js'),
+        command: process.execPath + ' ' + resolve('docker-login.js'),
         environment: {
           AWS_REGION: region,
           AUTHORIZATION_TOKEN: authorizationToken,
@@ -268,17 +269,43 @@ class DeploymentStack extends cdktf.TerraformStack {
 class ChartsStack extends cdktf.TerraformStack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
+    const configPath = join(homedir(), '.kube/config');
+    new KubernetesProvider(this, 'KubernetesProvider', {
+      configPath,
+    });
     new HelmProvider(this, 'HelmProvider', {
       kubernetes: {
-        configPath: join(homedir(), '.kube/config'),
+        configPath,
       },
     });
 
+    const tailscaleAuthKey = new cdktf.TerraformVariable(this, 'TailscaleAuthKey', {
+      type: 'string',
+      sensitive: true,
+    });
+    tailscaleAuthKey.addValidation({
+      condition: cdktf.Fn.startswith(tailscaleAuthKey.stringValue, 'tskey-auth-'),
+      errorMessage: 'TF_VAR_TailscaleAuthKey env must start with tskey-auth-',
+    });
     const cloudflareApitoken = new cdktf.TerraformVariable(this, 'CloudflareApiToken', {
       type: 'string',
       sensitive: true,
     });
+    cloudflareApitoken.addValidation({
+      condition: cdktf.Op.eq(cdktf.Fn.lengthOf(cloudflareApitoken.stringValue), 40),
+      errorMessage: 'TF_VAR_CloudflareApiToken env must have length of 40',
+    });
 
+    const tailscaleAuthKeySecret = new kubernetes.secret.Secret(this, 'TailscaleAuthKeySecret', {
+      metadata: {
+        name: 'tailscale-subnet-router-secrets',
+      },
+      data: {
+        AUTH_KEY: tailscaleAuthKey.stringValue,
+      },
+    });
+
+    /** @link https://github.com/STRRL/cloudflare-tunnel-ingress-controller */
     const cloudflareTunnelIngress = new Release(this, 'CloudflareTunnelIngress', {
       name: 'cloudflare-tunnel-ingress',
       repository: 'https://helm.strrl.dev',
@@ -292,6 +319,7 @@ class ChartsStack extends cdktf.TerraformStack {
       })],
     });
 
+    /** @link https://artifacthub.io/packages/helm/estahn/httpbingo */
     const httpbin = new Release(this, 'HttpBin', {
       name: 'httpbin',
       repository: 'https://estahn.github.io/charts',
@@ -314,6 +342,7 @@ class ChartsStack extends cdktf.TerraformStack {
       })],
     });
 
+    /** @link https://artifacthub.io/packages/helm/bitnami/nginx */
     const httpbinNginx = new Release(this, 'HttpBinNginx', {
       name: 'httpbin-nginx',
       chart: 'nginx',
@@ -332,7 +361,8 @@ class ChartsStack extends cdktf.TerraformStack {
       dependsOn: [httpbin],
     });
 
-    new Release(this, 'NginxIngress', {
+    /** @link https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx */
+    const nginxIngress = new Release(this, 'NginxIngress', {
       name: 'nginx-ingress',
       repository: 'https://kubernetes.github.io/ingress-nginx',
       chart: 'ingress-nginx',
@@ -352,6 +382,76 @@ class ChartsStack extends cdktf.TerraformStack {
         },
       })],
       dependsOn: [httpbinNginx, cloudflareTunnelIngress],
+    });
+
+    // https://github.com/kubernetes/kubernetes/issues/129050
+    // @TODO patchesStrategicMerge is deprecated
+    const kustomization = {
+      resources: ['tailscale.backup.yaml'],
+      patchesStrategicMerge: [stringify({
+        apiVersion: 'apps/v1',
+        kind: 'StatefulSet',
+        metadata: {
+          name: 'tailscale-tailscale-subnet-router'
+        },
+        spec: {
+          template: {
+            spec: {
+              containers: [{
+                name: 'simple-reverse-proxy',
+                image: 'schmailzl/simple-reverse-proxy',
+                command: ['sh'],
+                args: ['-c', 'PROXY_URL=http://\\$NGINX_INGRESS_INGRESS_NGINX_CONTROLLER_SERVICE_HOST exec /entrypoint.sh']
+              }]
+            }
+          }
+        }
+      })],
+    };
+    //https://stackoverflow.com/a/79251346
+    const postrenderScript = `set -e
+cat > tailscale.backup.yaml
+cat > kustomization.yaml << EOM
+${stringify(kustomization)}
+EOM
+kubectl kustomize | tee tailscale.yaml
+`;
+    /** @link https://artifacthub.io/packages/helm/gtaylor/tailscale-subnet-router */
+    new Release(this, 'Tailscale', {
+      name: 'tailscale',
+      repository: 'https://gtaylor.github.io/helm-charts',
+      chart: 'tailscale-subnet-router',
+      values: [stringify({
+        image: {
+          repository: 'tailscale/tailscale',
+          tag: 'stable',
+        },
+        tailscale: {
+          routes: ['10.43.0.0/16'],
+        },
+      })],
+      postrender: {
+        binaryPath: 'sh',
+        args: ['-c', postrenderScript],
+      },
+      dependsOn: [tailscaleAuthKeySecret, nginxIngress],
+    });
+
+    /** @link https://artifacthub.io/packages/helm/longhorn/longhorn */
+    new Release(this, 'Longhorn', {
+      name: 'longhorn',
+      createNamespace: true,
+      namespace: 'longhorn-system',
+      repository: 'https://charts.longhorn.io',
+      chart: 'longhorn',
+      wait: false,
+      values: [stringify({
+        ingress: {
+          enabled: true,
+          ingressClassName: 'nginx',
+          host: 'longhorn.localhost',
+        },
+      })],
     });
   }
 }
@@ -373,3 +473,60 @@ new cdktf.CloudBackend(deploymentStack, {
 const chartsStack = new ChartsStack(app, 'ChartsStack');
 
 app.synth();
+
+/** @link https://github.com/moby/buildkit/blob/f8c19098c91a0cd4a2d9cd35e2b3c2a1c8b3f622/examples/kubernetes/statefulset.privileged.yaml */
+// eslint-disable-next-line @typescript-eslint/no-unused-expressions
+false && new kubernetes.statefulSet.StatefulSet(this, 'buildkitd', {
+  metadata: {
+    name: 'buildkitd',
+    labels: {
+      app: 'buildkitd',
+    },
+  },
+  spec: {
+    serviceName: 'buildkitd',
+    podManagementPolicy: 'Parallel',
+    replicas: '1',
+    selector: [
+      {
+        matchLabels: {
+          app: 'buildkitd',
+        },
+      },
+    ],
+    template: [
+      {
+        metadata: {
+          labels: {
+            app: 'buildkitd',
+          },
+        },
+        spec: {
+          container: [
+            {
+              name: 'buildkitd',
+              image: 'moby/buildkit:buildx-stable-1',
+              securityContext: {
+                privileged: true,
+              },
+              readinessProbe: {
+                exec: {
+                  command: ['buildctl', 'debug', 'workers'],
+                },
+                initialDelaySeconds: 5,
+                periodSeconds: 30,
+              },
+              livenessProbe: {
+                exec: {
+                  command: ['buildctl', 'debug', 'workers'],
+                },
+                initialDelaySeconds: 5,
+                periodSeconds: 30,
+              },
+            },
+          ],
+        },
+      },
+    ],
+  },
+});;;;;
