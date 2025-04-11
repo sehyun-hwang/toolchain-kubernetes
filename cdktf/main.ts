@@ -266,6 +266,13 @@ class DeploymentStack extends cdktf.TerraformStack {
   }
 }
 
+enum Domains {
+  httpbin = 'httpbin.3091977.xyz',
+  otel = 'otel.3091977.xyz',
+  signoz = 'signoz.localhost',
+  longhorn = 'longhorn.localhost',
+}
+
 class ChartsStack extends cdktf.TerraformStack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
@@ -294,6 +301,59 @@ class ChartsStack extends cdktf.TerraformStack {
     cloudflareApitoken.addValidation({
       condition: cdktf.Op.eq(cdktf.Fn.lengthOf(cloudflareApitoken.stringValue), 40),
       errorMessage: 'TF_VAR_CloudflareApiToken env must have length of 40',
+    });
+
+    /** @link https://github.com/moby/buildkit/blob/f8c19098c91a0cd4a2d9cd35e2b3c2a1c8b3f622/examples/kubernetes/statefulset.privileged.yaml */
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    new kubernetes.statefulSet.StatefulSet(this, 'buildkitd', {
+      metadata: {
+        name: 'buildkitd',
+        labels: {
+          app: 'buildkitd',
+        },
+      },
+      spec: {
+        serviceName: 'buildkitd',
+        podManagementPolicy: 'Parallel',
+        replicas: '1',
+        selector: {
+          matchLabels: {
+            app: 'buildkitd',
+          },
+        },
+        template: {
+          metadata: {
+            labels: {
+              app: 'buildkitd',
+            },
+          },
+          spec: {
+            container: [
+              {
+                name: 'buildkitd',
+                image: 'moby/buildkit:buildx-stable-1',
+                securityContext: {
+                  privileged: true,
+                },
+                readinessProbe: {
+                  exec: {
+                    command: ['buildctl', 'debug', 'workers'],
+                  },
+                  initialDelaySeconds: 5,
+                  periodSeconds: 30,
+                },
+                livenessProbe: {
+                  exec: {
+                    command: ['buildctl', 'debug', 'workers'],
+                  },
+                  initialDelaySeconds: 5,
+                  periodSeconds: 30,
+                },
+              },
+            ],
+          },
+        },
+      },
     });
 
     const tailscaleAuthKeySecret = new kubernetes.secret.Secret(this, 'TailscaleAuthKeySecret', {
@@ -332,7 +392,7 @@ class ChartsStack extends cdktf.TerraformStack {
           enabled: true,
           className: 'cloudflare-tunnel',
           hosts: [{
-            host: 'httpbin.3091977.xyz',
+            host: Domains.httpbin,
             paths: [{
               path: '/',
               pathType: 'ImplementationSpecific',
@@ -392,7 +452,7 @@ class ChartsStack extends cdktf.TerraformStack {
         apiVersion: 'apps/v1',
         kind: 'StatefulSet',
         metadata: {
-          name: 'tailscale-tailscale-subnet-router'
+          name: 'tailscale-tailscale-subnet-router',
         },
         spec: {
           template: {
@@ -401,14 +461,18 @@ class ChartsStack extends cdktf.TerraformStack {
                 name: 'simple-reverse-proxy',
                 image: 'schmailzl/simple-reverse-proxy',
                 command: ['sh'],
-                args: ['-c', 'PROXY_URL=http://\\$NGINX_INGRESS_INGRESS_NGINX_CONTROLLER_SERVICE_HOST exec /entrypoint.sh']
-              }]
-            }
-          }
-        }
+                args: ['-c', 'PROXY_URL=http://\\$NGINX_INGRESS_INGRESS_NGINX_CONTROLLER_SERVICE_HOST exec /entrypoint.sh'],
+                env: [{
+                  name: 'ADDITIONAL_CONFIG',
+                  value: `proxy_set_header Host \\$host;
+proxy_set_header X-Forwarded-For \\$remote_addr;`,
+                }],
+              }],
+            },
+          },
+        },
       })],
     };
-    //https://stackoverflow.com/a/79251346
     const postrenderScript = `set -e
 cat > tailscale.backup.yaml
 cat > kustomization.yaml << EOM
@@ -438,7 +502,7 @@ kubectl kustomize | tee tailscale.yaml
     });
 
     /** @link https://artifacthub.io/packages/helm/longhorn/longhorn */
-    new Release(this, 'Longhorn', {
+    const longhorn = new Release(this, 'Longhorn', {
       name: 'longhorn',
       createNamespace: true,
       namespace: 'longhorn-system',
@@ -449,9 +513,47 @@ kubectl kustomize | tee tailscale.yaml
         ingress: {
           enabled: true,
           ingressClassName: 'nginx',
-          host: 'longhorn.localhost',
+          host: Domains.longhorn,
         },
       })],
+    });
+
+    /** @link https://github.com/SigNoz/charts/blob/main/charts/signoz/README.md */
+    new Release(this, 'Signoz', {
+      name: 'signoz',
+      repository: 'https://charts.signoz.io',
+      chart: 'signoz',
+      values: [stringify({
+        signoz: {
+          ingress: {
+            enabled: true,
+            className: 'nginx',
+            hosts: [{
+              host: Domains.signoz,
+              paths: [{
+                path: '/',
+                pathType: 'ImplementationSpecific',
+                port: 8080,
+              }],
+            }],
+          },
+        },
+        otelCollector: {
+          ingress: {
+            enabled: true,
+            className: 'cloudflare-tunnel',
+            hosts: [{
+              host: Domains.otel,
+              paths: [{
+                path: '/',
+                pathType: 'ImplementationSpecific',
+                port: 4318,
+              }],
+            }],
+          },
+        },
+      })],
+      dependsOn: [longhorn],
     });
   }
 }
@@ -473,60 +575,3 @@ new cdktf.CloudBackend(deploymentStack, {
 const chartsStack = new ChartsStack(app, 'ChartsStack');
 
 app.synth();
-
-/** @link https://github.com/moby/buildkit/blob/f8c19098c91a0cd4a2d9cd35e2b3c2a1c8b3f622/examples/kubernetes/statefulset.privileged.yaml */
-// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-false && new kubernetes.statefulSet.StatefulSet(this, 'buildkitd', {
-  metadata: {
-    name: 'buildkitd',
-    labels: {
-      app: 'buildkitd',
-    },
-  },
-  spec: {
-    serviceName: 'buildkitd',
-    podManagementPolicy: 'Parallel',
-    replicas: '1',
-    selector: [
-      {
-        matchLabels: {
-          app: 'buildkitd',
-        },
-      },
-    ],
-    template: [
-      {
-        metadata: {
-          labels: {
-            app: 'buildkitd',
-          },
-        },
-        spec: {
-          container: [
-            {
-              name: 'buildkitd',
-              image: 'moby/buildkit:buildx-stable-1',
-              securityContext: {
-                privileged: true,
-              },
-              readinessProbe: {
-                exec: {
-                  command: ['buildctl', 'debug', 'workers'],
-                },
-                initialDelaySeconds: 5,
-                periodSeconds: 30,
-              },
-              livenessProbe: {
-                exec: {
-                  command: ['buildctl', 'debug', 'workers'],
-                },
-                initialDelaySeconds: 5,
-                periodSeconds: 30,
-              },
-            },
-          ],
-        },
-      },
-    ],
-  },
-});;;;;
