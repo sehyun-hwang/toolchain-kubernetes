@@ -1,16 +1,25 @@
 version: "3.5"
 services:
-  tsed-server:
-    build:
-      context: .
-      args:
-        - http_proxy
-        - https_proxy
-        - no_proxy
-    ports:
-      - "8081:8081"
+  clickhouse:
+    image: clickhouse:lts
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     environment:
-      - PGPASSWORD=${PGPASSWORD:?error}
+      CLICKHOUSE_PASSWORD: "CLICKHOUSE_PASSWORD"
+    volumes:
+      - ./otel/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  otel:
+    image: signoz/signoz-otel-collector:0.111.16
+    ports:
+      - 4318:4318
+    volumes:
+      - ./otel/config.yaml:/etc/otel/config.yaml:ro
+    depends_on:
+      - clickhouse
+    restart: unless-stopped
 
   iam-pgbouncer:
     build: pgbouncer
@@ -20,6 +29,13 @@ services:
     user: root
     volumes:
       - ~/.aws:/root/.aws
+
+  tsed-server:
+    build: tsed
+    ports:
+      - "8081:8081"
+    depends_on:
+      - iam-pgbouncer
 
   pgbouncer:
     image: edoburu/pgbouncer

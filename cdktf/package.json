@@ -40,5 +40,11 @@
     "@types/node": "^22.13.14",
     "@types/write-file-atomic": "^4.0.3",
     "typescript": "^5.8.2"
-  }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-jq"
+    ]
+  },
+  "type": "module"
 }

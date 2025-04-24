@@ -23,10 +23,15 @@
     "stripInternal": true,
     "target": "ES2018",
     "incremental": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "typeRoots": [
+      "node_modules/@types"
+    ],
+    "noEmit": true,
+    "listFiles": true
   },
   "include": [
-    "**/*.ts",
+    "main.ts",
     "docker-login.js"
   ],
   "exclude": [

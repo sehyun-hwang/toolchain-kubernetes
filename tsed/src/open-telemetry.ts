@@ -35,7 +35,7 @@ const {
   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
 } = process.env;
 
-diag.setLogger(otelLogger, DiagLogLevel.VERBOSE);
+diag.setLogger(otelLogger, DiagLogLevel.INFO);
 
 const inMemoryMetricExporter = new InMemoryMetricExporter(1);
 const fileStream = createWriteStream('open-telemetry-metrics.log', { flags: 'a' });

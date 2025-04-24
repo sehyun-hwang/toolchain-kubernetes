@@ -1,4 +1,6 @@
 /* eslint-disable no-new, max-classes-per-file */
+import { readFileSync } from 'fs';
+import assert from 'node:assert/strict';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
 
@@ -10,9 +12,11 @@ import { EcrRepository } from '@cdktf/provider-aws/lib/ecr-repository/index.js';
 import { IamAccessKey } from '@cdktf/provider-aws/lib/iam-access-key/index.js';
 import { HelmProvider } from '@cdktf/provider-helm/lib/provider/index.js';
 import { Release } from '@cdktf/provider-helm/lib/release/index.js';
-import * as kubernetes from '@cdktf/provider-kubernetes';
+import { Deployment, type DeploymentSpecTemplateSpecContainerEnv } from '@cdktf/provider-kubernetes/lib/deployment/index.js';
 import { KubernetesProvider } from '@cdktf/provider-kubernetes/lib/provider/index.js';
-import { DataLocalFile } from '@cdktf/provider-local/lib/data-local-file/index.js';
+import { Secret } from '@cdktf/provider-kubernetes/lib/secret/index.js';
+import { Service } from '@cdktf/provider-kubernetes/lib/service/index.js';
+import { StatefulSet } from '@cdktf/provider-kubernetes/lib/stateful-set/index.js';
 import { File } from '@cdktf/provider-local/lib/file/index.js';
 import { LocalProvider } from '@cdktf/provider-local/lib/provider/index.js';
 import { type ImageArgs, Platform } from '@pulumi/docker-build';
@@ -20,15 +24,23 @@ import { NODE_REGION_CONFIG_OPTIONS } from '@smithy/config-resolver';
 import { loadConfig } from '@smithy/node-config-provider';
 import { Repository } from 'aws-cdk-lib/aws-ecr';
 import { User } from 'aws-cdk-lib/aws-iam';
-import { DatabaseInstance } from 'aws-cdk-lib/aws-rds';
+import { DatabaseInstance, type DatabaseInstanceAttributes } from 'aws-cdk-lib/aws-rds';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cdktf from 'cdktf/lib/index.js';
 import { invokeAspects } from 'cdktf/lib/synthesize/synthesizer.js';
+import { dependable } from 'cdktf/lib/tfExpression.js';
 import { Construct } from 'constructs';
 import { stringify } from 'yaml';
 
+import { ShellProvider } from './.gen/providers/shell/provider/index.js';
+import { Script } from './.gen/providers/shell/script/index.js';
+
 const region = await loadConfig(NODE_REGION_CONFIG_OPTIONS)();
-console.log({ region });
+const buildkitFlags = process.env.BUILDKIT_FLAGS || '';
+console.log({
+  region,
+  buildkitFlags,
+});
 
 {
   const resourceType = 'AWS::IAM::User';
@@ -59,14 +71,69 @@ console.log({ region });
 }
 
 enum ImageNames {
-  KubeApiServerProxy = 'kube-apiserver-proxy',
-  IamPgBouncer = 'iam-pgbouncer',
+  tsed = 'tsed',
+  iamPgBouncer = 'iam-pgbouncer',
+  coreosK3s = 'coreos-k3s',
 }
+
+const databaseInstanceAttributes: DatabaseInstanceAttributes = {
+  instanceEndpointAddress: 'default-postgres.cwggjv4mxugb.us-west-2.rds.amazonaws.com',
+  port: 5432,
+  instanceResourceId: 'db-R4XUY7T35NHLEA3FNCS6AZGJYQ',
+  instanceIdentifier: 'default-postgres',
+  securityGroups: [],
+};
 
 interface BakeTarget extends Omit<ImageArgs, 'context' | 'push'> {
   context: string;
   platforms: [Platform] | [Platform, Platform] | [Platform, Platform, Platform];
   contexts?: Record<string, string>;
+}
+
+class DependableScript extends Script {
+  get fqn() {
+    return dependable({
+      fqn: super.fqn,
+    });
+  }
+}
+
+class BuildxImage extends Construct {
+  fingerprint: string;
+
+  repository: EcrRepository;
+
+  output?: cdktf.StringMap;
+
+  constructor(scope: Construct, name: string, args: BakeTarget) {
+    super(scope, name);
+
+    const repository = new EcrRepository(this, 'Repository', {
+      name: cdktf.TerraformStack.of(this).node.addr.slice(0, 6) + '/' + name,
+
+      tags: {
+        app: name,
+      },
+    });
+    this.repository = repository;
+
+    const sourcePath = resolve('../', args.context);
+    let exclude: string[] = [];
+    try {
+      exclude = readFileSync(join(sourcePath, '.dockerignore'), 'utf-8').split('\n');
+    } catch (error) {
+      if ((error as Error & {
+        code: string;
+      }).code !== 'ENOENT')
+        throw error;
+    }
+
+    const fingerprint = cdk.FileSystem.fingerprint(sourcePath, {
+      exclude,
+      ignoreMode: cdk.IgnoreMode.DOCKER,
+    });
+    this.fingerprint = fingerprint;
+  }
 }
 
 class BuildxBake extends Construct {
@@ -78,19 +145,16 @@ class BuildxBake extends Construct {
 
   target: Record<string, BakeTarget> = {};
 
-  repositories: EcrRepository[] = [];
+  scopes: BuildxImage[] = [];
 
-  addTarget(name: string, args: BakeTarget) {
-    const stack = cdktf.TerraformStack.of(this);
-    const scope = new Construct(this, name);
-    const repository = new EcrRepository(scope, 'Repository', {
-      name: stack.node.addr.slice(0, 6) + '/' + name,
-    });
+  addTarget(name: ImageNames, args: BakeTarget) {
+    const scope = new BuildxImage(this, name, args);
+    this.scopes.push(scope);
 
     args.platforms.forEach(platform => {
       const arch = platform.split('/')[1];
       const tags = [...(args.tags as string[] | undefined || [])];
-      tags.push(repository.repositoryUrl + ':' + arch);
+      tags.push(scope.repository.repositoryUrl + ':' + arch);
 
       const targetName = name + '-' + arch;
       if (['arm64', 'amd64'].includes(arch))
@@ -103,6 +167,8 @@ class BuildxBake extends Construct {
         platforms: [platform],
       };
     });
+
+    return scope;
   }
 
   generateBakeFile() {
@@ -115,28 +181,81 @@ class BuildxBake extends Construct {
       ])),
     }, null, 2);
   }
+
+  get triggers() {
+    return Object.fromEntries(this.scopes.map(scope => [scope.node.id, scope.fingerprint]));
+  }
+
+  generateImageTooolsCommand(
+    metadataJsonOutput: cdktf.StringMap,
+    dependsOn: cdktf.ITerraformDependable[],
+  ) {
+    const getDigestCommand = (target: string) => cdktf.Fn.lookup(
+      cdktf.Fn.jsondecode(cdktf.Fn.lookup(metadataJsonOutput, target) as string),
+      'containerimage.digest',
+    ) as string;
+
+    this.scopes.forEach(scope => {
+      const repository = scope.node.findChild('Repository') as EcrRepository;
+      const { app } = repository._tags as {
+        app: string;
+      };
+      if (!(app + '-arm64' in this.target && app + '-amd64' in this.target))
+        return;
+
+      const latestTag = repository.repositoryUrl + ':latest';
+      const { fingerprint } = scope;
+      const script = new Script(scope, 'ImageToolsScript', {
+        lifecycleCommands: {
+          create: `docker-buildx imagetools create ${repository.repositoryUrl}:arm64@${getDigestCommand(app + '-arm64')} ${repository.repositoryUrl}:amd64@${getDigestCommand(app + '-amd64')} -t ${latestTag}`,
+          read: 'docker-buildx imagetools inspect --format "{{ json .Manifest }}" ' + latestTag,
+          delete: 'true',
+        },
+        dependsOn,
+        triggers: {
+          fingerprint,
+        },
+      });
+
+      new cdktf.TerraformOutput(scope, 'ImageToolsOutput', {
+        value: script.output,
+      });
+      // eslint-disable-next-line no-param-reassign
+      scope.output = script.output;
+    });
+  }
 }
 
 class ImagesStack extends cdktf.TerraformStack {
+  buildxBake: BuildxBake;
+
   metadataFilePath: string;
+
+  readonly ecrRepositories: EcrRepository[] = [];
+
+  metadataJsonOutput: cdktf.TerraformOutput;
 
   constructor(scope: Construct, id: string) {
     super(scope, id);
-    // new LocalExecProvider(this, "LocalExecProvider");
     new LocalProvider(this, 'LocalProvider');
+    new ShellProvider(this, 'ShellProvider');
     new AwsProvider(this, 'Aws', { region });
 
     const { authorizationToken } = new DataAwsEcrAuthorizationToken(this, 'DataAwsEcrAuthorizationToken');
     const buildxBake = new BuildxBake(this, 'BuildxBake');
-    buildxBake.addTarget('tsed', {
+    this.buildxBake = buildxBake;
+
+    const { repository: tsedRepository } = buildxBake.addTarget(ImageNames.tsed, {
       context: 'tsed',
       platforms: [Platform.Linux_arm64, Platform.Linux_amd64],
     });
-    buildxBake.addTarget('iam-pgbouncer', {
+    this.ecrRepositories.push(tsedRepository);
+    const { repository: iamPgBouncerRepository } = buildxBake.addTarget(ImageNames.iamPgBouncer, {
       context: 'pgbouncer',
       platforms: [Platform.Linux_arm64, Platform.Linux_amd64],
     });
-    buildxBake.addTarget('coreos-k3s', {
+    this.ecrRepositories.push(iamPgBouncerRepository);
+    buildxBake.addTarget(ImageNames.coreosK3s, {
       context: 'coreos-k3s',
       platforms: [Platform.Linux_arm64],
     });
@@ -164,65 +283,86 @@ class ImagesStack extends cdktf.TerraformStack {
         },
       }],
       triggersReplace: {
-        random: Math.random().toString(),
+        authorizationToken,
       },
     });
 
-    new cdktf.DataResource(this, 'BuildxBakeExec', {
-      provisioners: [{
-        type: 'local-exec',
-        workingDir: resolve('../'),
-        command: `docker-buildx bake --push -f ${resolveSynthPath(bakeFile.filename)} --metadata-file ${metadataFilePath}`,
-      }],
+    const buildxBakeScript = new DependableScript(this, 'BuildxBakeScript', {
+      workingDirectory: resolve('../'),
+      lifecycleCommands: {
+        create: `docker-buildx bake ${buildkitFlags} --push -f ${resolveSynthPath(bakeFile.filename)} --metadata-file ${metadataFilePath}`,
+        read: 'cat ' + metadataFilePath,
+        delete: 'rm ' + metadataFilePath,
+      },
       dependsOn: [bakeFile, dockerLoginExec],
-      triggersReplace: {
-        random: Math.random().toString(),
+      triggers: {
+        ...buildxBake.triggers,
       },
     });
 
-    // @TODO
-    /* docker-buildx imagetools create
-    248837585826.dkr.ecr.ap-northeast-1.amazonaws.com/c8d557/kube-apiserver-proxy:arm64@sha256:
-    248837585826.dkr.ecr.ap-northeast-1.amazonaws.com/c8d557/kube-apiserver-proxy:amd64@sha256:
-    -t 248837585826.dkr.ecr.ap-northeast-1.amazonaws.com/c8d557/kube-apiserver-proxy
-    */
+    const metadataJsonOutput = new cdktf.TerraformOutput(this, 'metadata-json-output', {
+      value: buildxBakeScript.output,
+      dependsOn: [buildxBakeScript],
+    });
+    this.metadataJsonOutput = metadataJsonOutput;
+
+    buildxBake.generateImageTooolsCommand(buildxBakeScript.output, [bakeFile, dockerLoginExec]);
+  }
+
+  getImage(name: ImageNames, platform?: Platform) {
+    const buildxImage = this.buildxBake.scopes.find(scope => scope.node.id as ImageNames === name);
+    assert(buildxImage);
+    const { repositoryUrl } = buildxImage.repository;
+    if (buildxImage.output)
+      return repositoryUrl + ':latest@' + (buildxImage.output.lookup('digest') as string);
+
+    assert(platform);
+    const target = name + '-' + platform.split('/')[1];
+    const targetMetadata = cdktf.Fn.jsondecode(
+      cdktf.Fn.lookup(this.metadataJsonOutput.value, target) as string,
+    );
+    return cdktf.Fn.lookup(targetMetadata, 'image.name') as string
+      + '@'
+      + (cdktf.Fn.lookup(targetMetadata, 'containerimage.digest') as string);
   }
 }
 
+interface AwsEcrConfig {
+  awsRegion: string;
+  _accountId: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+}
+
 class DeploymentStack extends cdktf.TerraformStack {
-  constructor(scope: Construct, id: string, props: { metadataFilePath: string; }) {
+  awsEcrConfig: AwsEcrConfig;
+
+  awsTsedEnvs: {
+    name: 'AWS_ACCESS_KEY_ID' | 'AWS_SECRET_ACCESS_KEY';
+    value: string;
+  }[];
+
+  constructor(scope: Construct, id: string, props: {
+    ecrRepositories: EcrRepository[];
+  }) {
     super(scope, id);
     new LocalProvider(this, 'LocalProvider');
     new AwsProvider(this, 'Aws', { region });
     const adapter = new AwsTerraformAdapter(this, 'AwsAdapter');
     const host = this.node.findChild('AwsAdapter');
 
-    const file = new DataLocalFile(this, 'metadata-json', {
-      filename: props.metadataFilePath,
-    });
-
     const user = new User(adapter, 'K3sUser');
     adapter.exportValue(user.userName, {
       name: 'K3sUserNameOutput',
     });
 
-    const imageName: string = cdktf.Fn.lookupNested(cdktf.Fn.jsondecode(file.content), ['iam-pgbouncer-arm64', 'image.name']);
-    let repositoryName = cdktf.Fn.trimprefix(
-      imageName,
-      cdktf.Fn.element(cdktf.Fn.split('/', imageName), 0) as string + '/',
-    );
-    repositoryName = cdktf.Fn.element(cdktf.Fn.split(':', repositoryName), 0);
-    const repository = Repository.fromRepositoryName(adapter, 'Repository', repositoryName);
-    const database = DatabaseInstance.fromDatabaseInstanceAttributes(adapter, 'Database', {
-      instanceEndpointAddress: 'default-postgres.cwggjv4mxugb.us-west-2.rds.amazonaws.com',
-      port: 5432,
-      instanceResourceId: 'db-R4XUY7T35NHLEA3FNCS6AZGJYQ',
-      instanceIdentifier: 'default-postgres',
-      securityGroups: [],
+    props.ecrRepositories.forEach(({ nameInput }) => {
+      const repository = Repository.fromRepositoryName(adapter, 'Repository-' + nameInput, nameInput);
+      repository.grantPull(user);
     });
 
-    repository.grantPull(user);
-    const grant = database.grantConnect(user, 'k3s');
+    const database = DatabaseInstance.fromDatabaseInstanceAttributes(adapter, 'Database', databaseInstanceAttributes);
+    const grant = database.grantConnect(user, 'tsed');
     grant.principalStatements[0].addResources(
       cdk.Arn.format({
         ...cdk.Arn.split(
@@ -232,13 +372,6 @@ class DeploymentStack extends cdktf.TerraformStack {
         region: 'us-west-2',
       }),
     );
-
-    const buckets = [];
-    cdktf.Aspects.of(cdktf.TerraformStack.of(this)).add({
-      visit: node => {
-        buckets.push(node);
-      },
-    });
 
     const accessKey = new IamAccessKey(this, 'K3sAccessKey', {
       user: cdktf.Lazy.stringValue({
@@ -260,9 +393,24 @@ class DeploymentStack extends cdktf.TerraformStack {
       value: accessKey.id,
     });
     new cdktf.TerraformOutput(this, 'K3sSecretAccessKeyOutput', {
-      value: accessKey.secret,
       sensitive: true,
+      value: accessKey.secret,
     });
+
+    this.awsEcrConfig = {
+      awsRegion: region,
+      _accountId: host.resolvePseudo('AWS::AccountId'),
+      awsAccessKeyId: accessKey.id,
+      awsSecretAccessKey: accessKey.secret,
+    };
+
+    this.awsTsedEnvs = [{
+      name: 'AWS_ACCESS_KEY_ID',
+      value: accessKey.id,
+    }, {
+      name: 'AWS_SECRET_ACCESS_KEY',
+      value: accessKey.secret,
+    }];
   }
 }
 
@@ -274,7 +422,12 @@ enum Domains {
 }
 
 class ChartsStack extends cdktf.TerraformStack {
-  constructor(scope: Construct, id: string) {
+  constructor(scope: Construct, id: string, props: {
+    tsedImage: string;
+    iamPgBouncerImage: string;
+    awsEcrConfig: AwsEcrConfig;
+    awsTsedEnvs: DeploymentSpecTemplateSpecContainerEnv[];
+  }) {
     super(scope, id);
     const configPath = join(homedir(), '.kube/config');
     new KubernetesProvider(this, 'KubernetesProvider', {
@@ -305,7 +458,7 @@ class ChartsStack extends cdktf.TerraformStack {
 
     /** @link https://github.com/moby/buildkit/blob/f8c19098c91a0cd4a2d9cd35e2b3c2a1c8b3f622/examples/kubernetes/statefulset.privileged.yaml */
     // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    new kubernetes.statefulSet.StatefulSet(this, 'buildkitd', {
+    new StatefulSet(this, 'buildkitd', {
       metadata: {
         name: 'buildkitd',
         labels: {
@@ -356,7 +509,7 @@ class ChartsStack extends cdktf.TerraformStack {
       },
     });
 
-    const tailscaleAuthKeySecret = new kubernetes.secret.Secret(this, 'TailscaleAuthKeySecret', {
+    const tailscaleAuthKeySecret = new Secret(this, 'TailscaleAuthKeySecret', {
       metadata: {
         name: 'tailscale-subnet-router-secrets',
       },
@@ -551,27 +704,164 @@ kubectl kustomize | tee tailscale.yaml
               }],
             }],
           },
+          config: {
+            service: {
+              telemetry: {
+                logs: {
+                  level: 'DEBUG',
+                },
+              },
+            },
+          },
         },
       })],
       dependsOn: [longhorn],
+    });
+
+    /** @link https://github.com/nabsul/k8s-ecr-login-renew */
+    // https://github.com/nabsul/k8s-ecr-login-renew/issues/66
+    const ecrLoginRenew = new Release(this, 'EcrLoginRenew', {
+      name: 'k8s-ecr-login-renew',
+      repository: 'https://nabsul.github.io/helm',
+      chart: 'k8s-ecr-login-renew',
+      values: [stringify({
+        ...props.awsEcrConfig,
+      })],
+    });
+
+    const tsedDbEnv = {
+      DB_NAME: 'tsed',
+      DB_USER: 'tsed',
+    };
+    const pgIsReadyCommand = [
+      'pg_isready',
+      '-h', 'localhost',
+      '-p', '6432',
+      '-d', tsedDbEnv.DB_NAME,
+      '-U', tsedDbEnv.DB_USER,
+    ];
+    const tsedDeployment = new Deployment(this, 'TsedDeployment', {
+      metadata: {
+        name: 'tsed',
+      },
+      dependsOn: [ecrLoginRenew],
+      spec: {
+        selector: {
+          matchLabels: {
+            app: 'tsed',
+          },
+        },
+        replicas: '2',
+        template: {
+          metadata: {
+            labels: {
+              app: 'tsed',
+            },
+            annotations: {
+              'kubectl.kubernetes.io/default-container': 'tsed',
+            }
+          },
+          spec: {
+            imagePullSecrets: [{
+              name: 'k8s-ecr-login-renew-docker-secret',
+            }],
+            container: [{
+              name: 'pgbouncer',
+              image: props.iamPgBouncerImage,
+              env: [...awsTsedEnvs, {
+                name: 'DB_HOST',
+                value: databaseInstanceAttributes.instanceEndpointAddress,
+              }, {
+                name: 'DB_USER',
+                value: tsedDbEnv.DB_USER,
+              }, {
+                name: 'DB_NAME',
+                value: tsedDbEnv.DB_NAME,
+              }],
+              lifecycle: {
+                postStart: [{
+                  exec: {
+                    command: ['sh', '-c', `while ! ${pgIsReadyCommand.join(' ')}; do
+  date
+  sleep 1
+done`],
+                  },
+                }],
+              },
+              livenessProbe: {
+                tcpSocket: [{
+                  port: '6432',
+                }],
+              },
+              readinessProbe: {
+                exec: {
+                  command: pgIsReadyCommand,
+                }
+              },
+            }, {
+              name: 'tsed',
+              image: props.tsedImage,
+              port: [{
+                name: 'http',
+                containerPort: 8081,
+              }],
+              env: [{
+                name: 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT',
+                value: `https://${Domains.otel}/v1/traces`,
+              }, {
+                name: 'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
+                value: `https://${Domains.otel}/v1/metrics`,
+              }, {
+                name: 'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT',
+                value: `https://${Domains.otel}/v1/logs`,
+              }],
+            }],
+          },
+        },
+      },
+    });
+
+    new Service(this, 'TsedService', {
+      metadata: {
+        name: 'tsed',
+        labels: {
+          app: 'tsed',
+        }
+      },
+      spec: {
+        selector: {
+          app: 'tsed',
+        },
+        port: [{
+          port: 80,
+          targetPort: 'http',
+        }],
+      },
+      dependsOn: [tsedDeployment],
     });
   }
 }
 
 const app = new cdktf.App();
 const imagesStack = new ImagesStack(app, 'ImagesStack');
-const { metadataFilePath } = imagesStack;
+const { ecrRepositories } = imagesStack;
+
 const deploymentStack = new DeploymentStack(app, 'DeploymentStack', {
-  metadataFilePath,
+  ecrRepositories,
 });
 deploymentStack.addDependency(imagesStack);
-
 new cdktf.CloudBackend(deploymentStack, {
   hostname: 'app.terraform.io',
   organization: 'sehyun-hwang',
   workspaces: new cdktf.NamedCloudWorkspace('k3s-playground'),
 });
 
-const chartsStack = new ChartsStack(app, 'ChartsStack');
+const { awsEcrConfig, awsTsedEnvs } = deploymentStack;
+const chartsStack = new ChartsStack(app, 'ChartsStack', {
+  awsEcrConfig,
+  awsTsedEnvs,
+  tsedImage: imagesStack.getImage(ImageNames.tsed),
+  iamPgBouncerImage: imagesStack.getImage(ImageNames.iamPgBouncer),
+});
 
 app.synth();
