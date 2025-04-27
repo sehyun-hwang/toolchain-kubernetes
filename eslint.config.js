@@ -10,9 +10,10 @@ export default [
     plugins: {
       '@tsed': tsedPlugin,
     },
+    ignores: ['tsed/src/migrations/*.ts'],
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['tsed/src/**/*.ts'],
     languageOptions: {
       globals: {
         ...globals.node,

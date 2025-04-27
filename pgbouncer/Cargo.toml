@@ -1,0 +1,17 @@
+[package]
+name = "pgbouncer-userlist"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pgbouncer-userlist"
+path = "main.rs"
+
+[dependencies]
+aws-config = "1.6.0"
+aws-credential-types = "1.2.2"
+aws-sigv4 = "1.3.0"
+aws-smithy-runtime-api = "1.7.4"
+reqwest = { version = "0.12" }
+tokio = { version = "1.44.1", features = ["full"] }
+url = "2.5.4"

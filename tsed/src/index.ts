@@ -38,5 +38,5 @@ try {
     await platform.stop();
   }));
 } catch (err) {
-  logger.error({ event: 'SERVER_BOOTSTRAP_ERROR', err });
+  logger.fatal({ event: 'SERVER_BOOTSTRAP_ERROR', err });
 }

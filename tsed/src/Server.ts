@@ -11,11 +11,11 @@ import { pinoHttp } from 'pino-http';
 
 import { config } from './config/index.js';
 import { requestLogger } from './config/logger/index.js';
-import mkiroOrmConfig from './config/mikro-orm.js';
 import {
   HelloWorldController,
   KeyValueController,
 } from './controllers/rest/index.js';
+import mkiroOrmConfig from './mikro-orm.config.js';
 
 @Configuration({
   ...config,

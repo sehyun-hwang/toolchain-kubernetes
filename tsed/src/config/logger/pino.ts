@@ -9,13 +9,14 @@ export const loggerOptions: LoggerOptions = {
   transport: {
     targets: [{
       target: pinoOpentelemetryTransport,
+      level: 'info',
       options: {
         resourceAttributes,
       },
     },
     {
       target: pinoPretty,
-      level: 'verbose',
+      // level: 'verbose',
       options: {
         useOnlyCustomProps: false,
         customColors: {

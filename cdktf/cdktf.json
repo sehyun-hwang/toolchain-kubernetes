@@ -1,0 +1,11 @@
+{
+  "language": "typescript",
+  "app": "SWCRC=true node --import @swc-node/register/esm-register main.ts",
+  "projectId": "669f1a07-824d-4781-8568-add0fb59aa93",
+  "sendCrashReports": "true",
+  "terraformProviders": [
+    "scottwinkler/shell@~> 1.7"
+  ],
+  "terraformModules": [],
+  "context": {}
+}

@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "devDependencies": {
+    "@tsed/eslint-plugin": "^1.1.11",
+    "globals": "^16.0.0"
+  }
+}

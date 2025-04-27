@@ -143,6 +143,8 @@ dist
 
 # End of https://www.toptal.com/developers/gitignore/api/node
 
-/pgbouncer/target
-/pgbouncer/bundle.pem
-/pgbouncer/userlist.txt
+!tsed/.env
+pgbouncer/target
+pgbouncer/bundle.pem
+pgbouncer/userlist.txt
+pgbouncer/k3s.service.env
