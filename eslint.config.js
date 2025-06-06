@@ -10,7 +10,10 @@ export default [
     plugins: {
       '@tsed': tsedPlugin,
     },
-    ignores: ['tsed/src/migrations/*.ts'],
+    ignores: [
+      'tsed/src/migrations/*.ts',
+      'cdktf/.gen/**/*.ts',
+    ],
   },
   {
     files: ['tsed/src/**/*.ts'],
@@ -22,6 +25,16 @@ export default [
     rules: {
       ...tsedPlugin.configs.recommended.rules,
       'import/prefer-default-export': 'off',
+    },
+  }, {
+    files: ['cdktf/lib/**/*.ts', 'cdktf/main.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-new': 'off',
     },
   },
 ];
