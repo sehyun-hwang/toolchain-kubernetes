@@ -2,8 +2,8 @@ import { createRequire } from 'node:module';
 
 import globals from 'globals';
 
-const require = createRequire(import.meta.url);
-const tsedPlugin = require('@tsed/eslint-plugin');
+const createdRequire = createRequire(import.meta.url);
+const tsedPlugin = createdRequire('@tsed/eslint-plugin');
 
 export default [
   {

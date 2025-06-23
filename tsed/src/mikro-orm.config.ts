@@ -14,17 +14,16 @@ export default defineConfig({
   debug: true,
   driverOptions: {
     connection: {
-      // ssl: true,
+      ssl: true,
     },
   },
   entities: [
     KeyValue,
   ],
 
-  host: 'localhost',
-  port: 6432,
+  host: 'ep-holy-darkness-a1kjlyjf-pooler.ap-southeast-1.aws.neon.tech',
+  // port: 6432,
   user: 'tsed',
-
   migrations: {
     path: 'dist/migrations',
     pathTs: 'src/migrations',
