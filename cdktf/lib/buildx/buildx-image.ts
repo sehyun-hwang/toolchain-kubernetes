@@ -11,21 +11,21 @@ import type { BakeTarget } from './buildx-bake.js';
 export default class BuildxImage extends Construct {
   fingerprint: string;
 
-  repository: EcrRepository;
+  // repository: EcrRepository;
 
   output?: cdktf.StringMap;
 
   constructor(scope: Construct, name: string, args: BakeTarget) {
     super(scope, name);
 
-    const repository = new EcrRepository(this, 'Repository', {
-      name: cdktf.TerraformStack.of(this).node.addr.slice(0, 6) + '/' + name,
+    // const repository = new EcrRepository(this, 'Repository', {
+    //   name: cdktf.TerraformStack.of(this).node.addr.slice(0, 6) + '/' + name,
 
-      tags: {
-        app: name,
-      },
-    });
-    this.repository = repository;
+    //   tags: {
+    //     app: name,
+    //   },
+    // });
+    // this.repository = repository;
 
     const sourcePath = resolve('../', args.context);
     let exclude: string[] = [];

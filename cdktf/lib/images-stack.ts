@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
+import type { constants } from 'node:os';
 import { join, resolve } from 'path';
 
-import { DataAwsEcrAuthorizationToken } from '@cdktf/aws-cdk/lib/aws/data-aws-ecr-authorization-token/index.js';
-import { AwsProvider } from '@cdktf/aws-cdk/lib/aws/provider/index.js';
 import type { EcrRepository } from '@cdktf/provider-aws/lib/ecr-repository/index.js';
 import { File } from '@cdktf/provider-local/lib/file/index.js';
 import { LocalProvider } from '@cdktf/provider-local/lib/provider/index.js';
@@ -16,6 +15,10 @@ import BuildxBake from './buildx/buildx-bake.js';
 import DependableScript from './buildx/dependable-script.js';
 import { AWS_REGION, buildkitFlags, ImageNames } from './config.js';
 
+interface ImagesStackOutput {
+  authorizationToken?: string;
+}
+
 export default class ImagesStack extends cdktf.TerraformStack {
   buildxBake: BuildxBake;
 
@@ -25,13 +28,15 @@ export default class ImagesStack extends cdktf.TerraformStack {
 
   metadataJsonOutput: cdktf.TerraformOutput;
 
-  constructor(scope: Construct, id: string) {
+  push: '' | '--push' = '';
+
+  constructor(scope: Construct, id: string, {
+    authorizationToken,
+  }: ImagesStackOutput) {
     super(scope, id);
     new LocalProvider(this, 'LocalProvider');
     new ShellProvider(this, 'ShellProvider');
-    new AwsProvider(this, 'Aws', { region: AWS_REGION });
 
-    const { authorizationToken } = new DataAwsEcrAuthorizationToken(this, 'DataAwsEcrAuthorizationToken');
     const buildxBake = new BuildxBake(this, 'BuildxBake');
     this.buildxBake = buildxBake;
 
@@ -63,29 +68,36 @@ export default class ImagesStack extends cdktf.TerraformStack {
     const metadataFilePath = resolveSynthPath('metadata.json');
     this.metadataFilePath = metadataFilePath;
 
-    const dockerLoginExec = new cdktf.DataResource(this, 'DockerLoginExec', {
-      provisioners: [{
-        type: 'local-exec',
-        command: process.execPath + ' ' + resolve('docker-login.js'),
-        environment: {
-          AWS_REGION,
-          AUTHORIZATION_TOKEN: authorizationToken,
+    const dockerLoginExec = undefined;
+    if (authorizationToken) {
+      const dockerLoginExec = new cdktf.DataResource(this, 'DockerLoginExec', {
+        provisioners: [{
+          type: 'local-exec',
+          command: process.execPath + ' ' + resolve('docker-login.js'),
+          environment: {
+            AWS_REGION,
+            AUTHORIZATION_TOKEN: authorizationToken,
+          },
+        }],
+        triggersReplace: {
+          authorizationToken,
         },
-      }],
-      triggersReplace: {
-        authorizationToken,
-      },
-    });
+      });
+    }
 
+    const push = cdktf.Lazy.stringValue({
+      produce: () => this.push,
+    });
     const buildxBakeScript = new DependableScript(this, 'BuildxBakeScript', {
       workingDirectory: resolve('../'),
       lifecycleCommands: {
-        create: `docker-buildx bake ${buildkitFlags} --push -f ${resolveSynthPath(bakeFile.filename)} --metadata-file ${metadataFilePath}`,
+        create: `docker buildx bake ${buildkitFlags} ${push} -f ${resolveSynthPath(bakeFile.filename)} --metadata-file ${metadataFilePath}`,
         read: 'cat ' + metadataFilePath,
         delete: 'rm ' + metadataFilePath,
       },
-      dependsOn: [bakeFile, dockerLoginExec],
+      dependsOn: [bakeFile],
       triggers: {
+        push,
         ...buildxBake.triggers,
       },
     });
@@ -96,7 +108,11 @@ export default class ImagesStack extends cdktf.TerraformStack {
     });
     this.metadataJsonOutput = metadataJsonOutput;
 
-    buildxBake.generateImageTooolsCommand(buildxBakeScript.output, [bakeFile, dockerLoginExec]);
+    // buildxBake.generateImageTooolsCommand(buildxBakeScript.output, [bakeFile, dockerLoginExec]);
+  }
+
+  addPush() {
+    this.push = '--push';
   }
 
   getImage(name: ImageNames, platform?: Platform) {

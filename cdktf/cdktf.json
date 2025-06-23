@@ -4,7 +4,16 @@
   "projectId": "669f1a07-824d-4781-8568-add0fb59aa93",
   "sendCrashReports": "true",
   "terraformProviders": [
-    "scottwinkler/shell@~> 1.7"
+    {
+      "name": "shell",
+      "source": "scottwinkler/shell",
+      "version": "~> 1.7"
+    },
+    {
+      "name": "minio",
+      "source": "aminueza/minio",
+      "version": "~> 3.5.3"
+    }
   ],
   "terraformModules": [],
   "context": {}

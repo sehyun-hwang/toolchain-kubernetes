@@ -25,19 +25,21 @@ export default class BuildxBake extends Construct {
 
   scopes: BuildxImage[] = [];
 
+  repositoryBaseUri = 'docker-registry.k8s.orb.local';
+
   addTarget(name: ImageNames, args: BakeTarget) {
     const scope = new BuildxImage(this, name, args);
     this.scopes.push(scope);
 
     args.platforms.forEach(platform => {
       const arch = platform.split('/')[1];
-      const tags = [...(args.tags as string[] | undefined || [])];
-      tags.push(scope.repository.repositoryUrl + ':' + arch);
+      const tags = [...(args.tags as string[] | undefined || [
+        this.repositoryBaseUri + '/' + name + ':' + arch,
+      ])];
 
       const targetName = name + '-' + arch;
       if (['arm64', 'amd64'].includes(arch))
         this.group[arch as 'arm64' | 'amd64'].targets.push(targetName);
-      this.group.default.targets.push(targetName);
 
       this.target[targetName] = {
         ...args,
@@ -45,6 +47,15 @@ export default class BuildxBake extends Construct {
         platforms: [platform],
       };
     });
+
+    const defaultTags = [...(args.tags as string[] | undefined || [
+      this.repositoryBaseUri + '/' + name,
+    ])];
+    this.target[name] = {
+      tags: defaultTags,
+      ...args,
+    };
+    this.group.default.targets.push(name);
 
     return scope;
   }
@@ -64,42 +75,42 @@ export default class BuildxBake extends Construct {
     return Object.fromEntries(this.scopes.map(scope => [scope.node.id, scope.fingerprint]));
   }
 
-  generateImageTooolsCommand(
-    metadataJsonOutput: cdktf.StringMap,
-    dependsOn: cdktf.ITerraformDependable[],
-  ) {
-    const getDigestCommand = (target: string) => cdktf.Fn.lookup(
-      cdktf.Fn.jsondecode(cdktf.Fn.lookup(metadataJsonOutput, target) as string),
-      'containerimage.digest',
-    ) as string;
+  // generateImageTooolsCommand(
+  //   metadataJsonOutput: cdktf.StringMap,
+  //   dependsOn: cdktf.ITerraformDependable[],
+  // ) {
+  //   const getDigestCommand = (target: string) => cdktf.Fn.lookup(
+  //     cdktf.Fn.jsondecode(cdktf.Fn.lookup(metadataJsonOutput, target) as string),
+  //     'containerimage.digest',
+  //   ) as string;
 
-    this.scopes.forEach(scope => {
-      const repository = scope.node.findChild('Repository') as EcrRepository;
-      const { app } = repository._tags as {
-        app: string;
-      };
-      if (!(app + '-arm64' in this.target && app + '-amd64' in this.target))
-        return;
+  //   this.scopes.forEach(scope => {
+  //     const repository = scope.node.findChild('Repository') as EcrRepository;
+  //     const { app } = repository._tags as {
+  //       app: string;
+  //     };
+  //     if (!(app + '-arm64' in this.target && app + '-amd64' in this.target))
+  //       return;
 
-      const latestTag = repository.repositoryUrl + ':latest';
-      const { fingerprint } = scope;
-      const script = new Script(scope, 'ImageToolsScript', {
-        lifecycleCommands: {
-          create: `docker-buildx imagetools create ${repository.repositoryUrl}:arm64@${getDigestCommand(app + '-arm64')} ${repository.repositoryUrl}:amd64@${getDigestCommand(app + '-amd64')} -t ${latestTag}`,
-          read: 'docker-buildx imagetools inspect --format "{{ json .Manifest }}" ' + latestTag,
-          delete: 'true',
-        },
-        dependsOn,
-        triggers: {
-          fingerprint,
-        },
-      });
+  //     const latestTag = repository.repositoryUrl + ':latest';
+  //     const { fingerprint } = scope;
+  //     const script = new Script(scope, 'ImageToolsScript', {
+  //       lifecycleCommands: {
+  //         create: `docker-buildx imagetools create ${repository.repositoryUrl}:arm64@${getDigestCommand(app + '-arm64')} ${repository.repositoryUrl}:amd64@${getDigestCommand(app + '-amd64')} -t ${latestTag}`,
+  //         read: 'docker-buildx imagetools inspect --format "{{ json .Manifest }}" ' + latestTag,
+  //         delete: 'true',
+  //       },
+  //       dependsOn,
+  //       triggers: {
+  //         fingerprint,
+  //       },
+  //     });
 
-      new cdktf.TerraformOutput(scope, 'ImageToolsOutput', {
-        value: script.output,
-      });
-      // eslint-disable-next-line no-param-reassign
-      scope.output = script.output;
-    });
-  }
+  //     new cdktf.TerraformOutput(scope, 'ImageToolsOutput', {
+  //       value: script.output,
+  //     });
+  //     // eslint-disable-next-line no-param-reassign
+  //     scope.output = script.output;
+  //   });
+  // }
 }

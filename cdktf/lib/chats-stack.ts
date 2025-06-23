@@ -5,7 +5,6 @@ import { HelmProvider } from '@cdktf/provider-helm/lib/provider/index.js';
 import { Release } from '@cdktf/provider-helm/lib/release/index.js';
 import { KubernetesProvider } from '@cdktf/provider-kubernetes/lib/provider/index.js';
 import { Secret } from '@cdktf/provider-kubernetes/lib/secret/index.js';
-import { StatefulSet } from '@cdktf/provider-kubernetes/lib/stateful-set/index.js';
 import * as cdktf from 'cdktf/lib/index.js';
 import type { Construct } from 'constructs';
 import { stringify } from 'yaml';
@@ -13,10 +12,17 @@ import { stringify } from 'yaml';
 import { Domains } from './config.js';
 import type { AwsEcrConfig } from './deployment-stack.js';
 
+interface ChartsStackProps {
+  // awsEcrConfig: AwsEcrConfig;
+  dockerRegistryBucketName: string;
+  s3Config: {
+    accessKey: string;
+    secretKey: string;
+  };
+}
+
 export default class ChartsStack extends cdktf.TerraformStack {
-  constructor(scope: Construct, id: string, props: {
-    awsEcrConfig: AwsEcrConfig;
-  }) {
+  constructor(scope: Construct, id: string, props: ChartsStackProps) {
     super(scope, id);
     const configPath = join(homedir(), '.kube/config');
     new KubernetesProvider(this, 'KubernetesProvider', {
@@ -45,58 +51,6 @@ export default class ChartsStack extends cdktf.TerraformStack {
       errorMessage: 'TF_VAR_CloudflareApiToken env must have length of 40',
     });
 
-    /** @link https://github.com/moby/buildkit/blob/f8c19098c91a0cd4a2d9cd35e2b3c2a1c8b3f622/examples/kubernetes/statefulset.privileged.yaml */
-    new StatefulSet(this, 'buildkitd', {
-      metadata: {
-        name: 'buildkitd',
-        labels: {
-          app: 'buildkitd',
-        },
-      },
-      spec: {
-        serviceName: 'buildkitd',
-        podManagementPolicy: 'Parallel',
-        replicas: '1',
-        selector: {
-          matchLabels: {
-            app: 'buildkitd',
-          },
-        },
-        template: {
-          metadata: {
-            labels: {
-              app: 'buildkitd',
-            },
-          },
-          spec: {
-            container: [
-              {
-                name: 'buildkitd',
-                image: 'moby/buildkit:buildx-stable-1',
-                securityContext: {
-                  privileged: true,
-                },
-                readinessProbe: {
-                  exec: {
-                    command: ['buildctl', 'debug', 'workers'],
-                  },
-                  initialDelaySeconds: 5,
-                  periodSeconds: 30,
-                },
-                livenessProbe: {
-                  exec: {
-                    command: ['buildctl', 'debug', 'workers'],
-                  },
-                  initialDelaySeconds: 5,
-                  periodSeconds: 30,
-                },
-              },
-            ],
-          },
-        },
-      },
-    });
-
     const tailscaleAuthKeySecret = new Secret(this, 'TailscaleAuthKeySecret', {
       metadata: {
         name: 'tailscale-subnet-router-secrets',
@@ -106,7 +60,48 @@ export default class ChartsStack extends cdktf.TerraformStack {
       },
     });
 
-    /** @link https://github.com/STRRL/cloudflare-tunnel-ingress-controller */
+    /** {@link https://artifacthub.io/packages/helm/twuni/docker-registry} */
+    new Release(this, 'DockerRegistry', {
+      name: 'docker-registry',
+      repository: 'https://helm.twun.io',
+      chart: 'docker-registry',
+      values: [stringify({
+        image: {
+          repository: 'distribution/distribution',
+          tag: '3',
+        },
+        replicaCount: 2,
+        ingress: {
+          enabled: true,
+          hosts: ['docker-registry.k8s.orb.local'],
+          annotations: {
+            'nginx.ingress.kubernetes.io/proxy-body-size': '1g',
+          },
+        },
+        storage: 's3',
+        s3: {
+          region: 'us-east-1',
+          regionEndpoint: 'host.docker.internal:9000',
+          bucket: props.dockerRegistryBucketName,
+          secure: 'false',
+        },
+        secrets: {
+          s3: props.s3Config,
+        },
+        extraEnvVars: [
+          {
+            name: 'REGISTRY_LOG_LEVEL',
+            value: 'debug',
+          },
+          {
+            name: 'REGISTRY_STORAGE_S3_FORCEPATHSTYLE',
+            value: 'true',
+          },
+        ],
+      })],
+    });
+
+    /** {@link https://github.com/STRRL/cloudflare-tunnel-ingress-controller} */
     const cloudflareTunnelIngress = new Release(this, 'CloudflareTunnelIngress', {
       name: 'cloudflare-tunnel-ingress',
       repository: 'https://helm.strrl.dev',
@@ -120,7 +115,7 @@ export default class ChartsStack extends cdktf.TerraformStack {
       })],
     });
 
-    /** @link https://artifacthub.io/packages/helm/estahn/httpbingo */
+    /** {@link https://artifacthub.io/packages/helm/estahn/httpbingo} */
     const httpbin = new Release(this, 'HttpBin', {
       name: 'httpbin',
       repository: 'https://estahn.github.io/charts',
@@ -162,19 +157,19 @@ export default class ChartsStack extends cdktf.TerraformStack {
       dependsOn: [httpbin],
     });
 
-    /** @link https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx */
+    /** {@link https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx} */
     const nginxIngress = new Release(this, 'NginxIngress', {
       name: 'nginx-ingress',
       repository: 'https://kubernetes.github.io/ingress-nginx',
       chart: 'ingress-nginx',
       values: [stringify({
         controller: {
-          service: {
-            type: 'ClusterIP',
-          },
+          // service: {
+          //   type: 'ClusterIP',
+          // },
           config: {
-            'whitelist-source-range': '10.42.0.0/16',
-            'blacklist-source-range': 'all',
+            // 'whitelist-source-range': '10.42.0.0/16',
+            // 'blacklist-source-range': 'all',
           },
           extraArgs: {
             'default-backend-service': 'default/httpbin-nginx',
@@ -242,24 +237,7 @@ kubectl kustomize | tee tailscale.yaml
       dependsOn: [tailscaleAuthKeySecret, nginxIngress],
     });
 
-    /** @link https://artifacthub.io/packages/helm/longhorn/longhorn */
-    const longhorn = new Release(this, 'Longhorn', {
-      name: 'longhorn',
-      createNamespace: true,
-      namespace: 'longhorn-system',
-      repository: 'https://charts.longhorn.io',
-      chart: 'longhorn',
-      wait: false,
-      values: [stringify({
-        ingress: {
-          enabled: true,
-          ingressClassName: 'nginx',
-          host: Domains.longhorn,
-        },
-      })],
-    });
-
-    /** @link https://github.com/SigNoz/charts/blob/main/charts/signoz/README.md */
+    /** {@link https://github.com/SigNoz/charts/blob/main/charts/signoz/README.md} */
     new Release(this, 'Signoz', {
       name: 'signoz',
       repository: 'https://charts.signoz.io',
@@ -310,18 +288,19 @@ kubectl kustomize | tee tailscale.yaml
           },
         },
       })],
-      dependsOn: [longhorn],
     });
 
-    /** @link https://github.com/nabsul/k8s-ecr-login-renew */
-    // https://github.com/nabsul/k8s-ecr-login-renew/issues/66
-    new Release(this, 'EcrLoginRenew', {
-      name: 'k8s-ecr-login-renew',
-      repository: 'https://nabsul.github.io/helm',
-      chart: 'k8s-ecr-login-renew',
-      values: [stringify({
-        ...props.awsEcrConfig,
-      })],
-    });
+    /**
+     * {@link https://github.com/nabsul/k8s-ecr-login-renew}
+     * {@link https://github.com/nabsul/k8s-ecr-login-renew/issues/66}
+     */
+    // new Release(this, 'EcrLoginRenew', {
+    //   name: 'k8s-ecr-login-renew',
+    //   repository: 'https://nabsul.github.io/helm',
+    //   chart: 'k8s-ecr-login-renew',
+    //   values: [stringify({
+    //     ...props.awsEcrConfig,
+    //   })],
+    // });
   }
 }

@@ -7,15 +7,7 @@ import { Service } from '@cdktf/provider-kubernetes/lib/service/index.js';
 import * as cdktf from 'cdktf/lib/index.js';
 import type { Construct } from 'constructs';
 
-import { databaseInstanceAttributes, Domains, tsedDbEnv } from './config.js';
-
-const pgIsReadyCommand = [
-  'pg_isready',
-  '-h', 'localhost',
-  '-p', '6432',
-  '-d', tsedDbEnv.DB_NAME,
-  '-U', tsedDbEnv.DB_USER,
-];
+import { Domains } from './config.js';
 
 export default class TsedStack extends cdktf.TerraformStack {
   constructor(scope: Construct, id: string, props: {
@@ -44,48 +36,12 @@ export default class TsedStack extends cdktf.TerraformStack {
             labels: {
               app: 'tsed',
             },
-            annotations: {
-              'kubectl.kubernetes.io/default-container': 'tsed',
-            },
           },
           spec: {
             imagePullSecrets: [{
               name: 'k8s-ecr-login-renew-docker-secret',
             }],
             container: [{
-              name: 'pgbouncer',
-              image: props.iamPgBouncerImage,
-              env: [...props.awsTsedEnvs, {
-                name: 'DB_HOST',
-                value: databaseInstanceAttributes.instanceEndpointAddress,
-              }, {
-                name: 'DB_USER',
-                value: tsedDbEnv.DB_USER,
-              }, {
-                name: 'DB_NAME',
-                value: tsedDbEnv.DB_NAME,
-              }],
-              lifecycle: {
-                postStart: [{
-                  exec: {
-                    command: ['sh', '-c', `while ! ${pgIsReadyCommand.join(' ')}; do
-  date
-  sleep 1
-done`],
-                  },
-                }],
-              },
-              livenessProbe: {
-                tcpSocket: [{
-                  port: '6432',
-                }],
-              },
-              readinessProbe: {
-                exec: {
-                  command: pgIsReadyCommand,
-                },
-              },
-            }, {
               name: 'tsed',
               image: props.tsedImage,
               port: [{

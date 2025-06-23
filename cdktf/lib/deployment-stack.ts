@@ -1,16 +1,15 @@
 import { AwsTerraformAdapter } from '@cdktf/aws-cdk';
+import { DataAwsEcrAuthorizationToken } from '@cdktf/aws-cdk/lib/aws/data-aws-ecr-authorization-token/index.js';
 import { AwsProvider } from '@cdktf/aws-cdk/lib/aws/provider/index.js';
 import type { EcrRepository } from '@cdktf/provider-aws/lib/ecr-repository/index.js';
 import { IamAccessKey } from '@cdktf/provider-aws/lib/iam-access-key/index.js';
 import { Repository } from 'aws-cdk-lib/aws-ecr';
 import { User } from 'aws-cdk-lib/aws-iam';
-import { DatabaseInstance } from 'aws-cdk-lib/aws-rds';
-import * as cdk from 'aws-cdk-lib/core';
 import * as cdktf from 'cdktf/lib/index.js';
 import { invokeAspects } from 'cdktf/lib/synthesize/synthesizer.js';
 import type { Construct } from 'constructs';
 
-import { AWS_REGION, databaseInstanceAttributes } from './config.js';
+import { AWS_REGION } from './config.js';
 
 export interface AwsEcrConfig {
   awsRegion: string;
@@ -45,18 +44,6 @@ export default class DeploymentStack extends cdktf.TerraformStack {
       const repository = Repository.fromRepositoryName(adapter, 'Repository-' + nameInput, nameInput);
       repository.grantPull(user);
     });
-
-    const database = DatabaseInstance.fromDatabaseInstanceAttributes(adapter, 'Database', databaseInstanceAttributes);
-    const grant = database.grantConnect(user, 'tsed');
-    grant.principalStatements[0].addResources(
-      cdk.Arn.format({
-        ...cdk.Arn.split(
-          grant.principalStatements[0].resources[0],
-          cdk.ArnFormat.COLON_RESOURCE_NAME,
-        ),
-        region: 'us-west-2',
-      }),
-    );
 
     const accessKey = new IamAccessKey(this, 'K3sAccessKey', {
       user: cdktf.Lazy.stringValue({
@@ -96,5 +83,7 @@ export default class DeploymentStack extends cdktf.TerraformStack {
       name: 'AWS_SECRET_ACCESS_KEY',
       value: accessKey.secret,
     }];
+
+    const { authorizationToken } = new DataAwsEcrAuthorizationToken(this, 'DataAwsEcrAuthorizationToken');
   }
 }

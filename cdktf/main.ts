@@ -5,6 +5,7 @@ import ChartsStack from './lib/chats-stack.js';
 import { ImageNames } from './lib/config.js';
 import DeploymentStack from './lib/deployment-stack.js';
 import ImagesStack from './lib/images-stack.js';
+import HostStack from './lib/minio-stack.js';
 import TsedStack from './lib/tsed-stack.js';
 
 {
@@ -36,11 +37,17 @@ import TsedStack from './lib/tsed-stack.js';
 }
 
 const app = new cdktf.App();
-const imagesStack = new ImagesStack(app, 'ImagesStack');
+
+const hostStack = new HostStack(app, 'HostStack');
+
+const imagesStack = new ImagesStack(app, 'ImagesStack', {
+
+});
+imagesStack.addPush();
 const { ecrRepositories } = imagesStack;
 
 const deploymentStack = new DeploymentStack(app, 'DeploymentStack', {
-  ecrRepositories,
+  ecrRepositories: [],
 });
 deploymentStack.addDependency(imagesStack);
 new cdktf.CloudBackend(deploymentStack, {
@@ -49,16 +56,19 @@ new cdktf.CloudBackend(deploymentStack, {
   workspaces: new cdktf.NamedCloudWorkspace('k3s-playground'),
 });
 
-const { awsEcrConfig, awsTsedEnvs } = deploymentStack;
+// const { awsEcrConfig, awsTsedEnvs } = deploymentStack;
 const chartsStack = new ChartsStack(app, 'ChartsStack', {
-  awsEcrConfig,
+  // awsEcrConfig,
+  dockerRegistryBucketName: hostStack.dockerRegistryBucketName,
+  s3Config: {
+    ...hostStack.dockerRegistrySecret,
+  },
 });
 
-const tsedStack = new TsedStack(app, 'TsedStack', {
-  awsTsedEnvs,
-  tsedImage: imagesStack.getImage(ImageNames.tsed),
-  iamPgBouncerImage: imagesStack.getImage(ImageNames.iamPgBouncer),
-});
-tsedStack.addDependency(chartsStack);
+// const tsedStack = new TsedStack(app, 'TsedStack', {
+//   awsTsedEnvs,
+//   tsedImage: imagesStack.getImage(ImageNames.tsed),
+// });
+// tsedStack.addDependency(chartsStack);
 
 app.synth();
