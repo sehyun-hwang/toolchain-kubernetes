@@ -1,0 +1,4 @@
+{
+  "frontend": "localhost:5000/frontend@sha256:9bc298db71fa573a9bdd9df131a6c8cf1a24ce08b93aaddf3b5e01de8c7eeaa3",
+  "backend": "localhost:5000/backend@sha256:1a400817f4c7cb4593e586ab863e517b3b35845fb37e3319c783e24e7cb2aeb1"
+}
