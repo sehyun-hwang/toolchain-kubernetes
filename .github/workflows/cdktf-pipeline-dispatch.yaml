@@ -1,0 +1,66 @@
+name: CDKTN fixture metadata dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Same-repository PR number (forks are not supported)
+        required: true
+        type: string
+      operation:
+        description: Metadata operation; prepared trusted controller performs deployment and tests
+        required: true
+        type: choice
+        options: [open, update, reopen, rerun, close]
+permissions: {}
+concurrency:
+  group: cdktf-dispatch-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    if: github.repository == 'sehyun-hwang/toolchain-kubernetes' && github.ref == vars.CDKTF_PIPELINE_APPROVED_REF
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: read
+    steps:
+      # No checkout: this privileged job must never execute PR-defined code.
+      - name: Validate metadata against GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          OPERATION: ${{ inputs.operation }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]{0,8}$ ]]
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          jq -e --argjson id "$REPOSITORY_ID" --arg operation "$OPERATION" '
+            .base.repo.id == $id and .head.repo.id == $id and
+            (.head.sha | test("^[0-9a-f]{40}$")) and
+            (.state == (if $operation == "close" then "closed" else "open" end))
+          ' "$RUNNER_TEMP/pr.json"
+          jq -n --arg repository "$REPOSITORY" --argjson repositoryId "$REPOSITORY_ID" \
+            --argjson prNumber "$PR_NUMBER" --arg operation "$OPERATION" \
+            --arg headSha "$(jq -r '.head.sha' "$RUNNER_TEMP/pr.json")" \
+            --argjson runId "$RUN_ID" --argjson runAttempt "$RUN_ATTEMPT" \
+            --arg requestedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion: 1, repositoryId: $repositoryId, repository: $repository,
+              prNumber: $prNumber, operation: $operation, headSha: $headSha,
+              runId: $runId, runAttempt: $runAttempt, eventName: "workflow_dispatch", requestedAt: $requestedAt}' \
+            > "$RUNNER_TEMP/dispatch.json"
+      - name: Assume metadata-only dispatch role
+        uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df
+        with:
+          role-to-assume: ${{ vars.CDKTF_PIPELINE_DISPATCH_ROLE_ARN }}
+          aws-region: ${{ vars.CDKTF_PIPELINE_REGION }}
+          role-session-name: dispatch-${{ github.run_id }}
+      - name: Enqueue metadata
+        env:
+          QUEUE_URL: ${{ vars.CDKTF_PIPELINE_QUEUE_URL }}
+        run: |
+          set -euo pipefail
+          aws sqs send-message --queue-url "$QUEUE_URL" --message-body "file://$RUNNER_TEMP/dispatch.json"
