@@ -1,0 +1,78 @@
+name: baseline.publish
+on:
+  push:
+    branches: [experiment/cdktn-deploy-applications]
+  workflow_dispatch:
+    inputs: {}
+permissions: {}
+jobs:
+  enqueue:
+    if: github.repository == 'sehyun-hwang/toolchain-kubernetes' && (github.ref == vars.CDKTF_PIPELINE_APPROVED_REF)
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      request: ${{ steps.envelope.outputs.request }}
+    steps:
+      - name: Preserve original Actions event in bounded metadata envelope
+        id: envelope
+        env:
+          OPERATION: baseline.publish
+        shell: python
+        run: |
+          import json, os
+          from pathlib import Path
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          envelope = {'schemaVersion': 1, 'operation': os.environ['OPERATION'],
+                      'eventName': os.environ['GITHUB_EVENT_NAME'],
+                      'workflowRunId': int(os.environ['GITHUB_RUN_ID']),
+                      'workflowRunAttempt': int(os.environ['GITHUB_RUN_ATTEMPT']), 'event': event}
+          body = json.dumps(envelope, ensure_ascii=False, separators=(',', ':')).encode()
+          if len(body) > 1024 * 1024:
+              raise SystemExit('Event exceeds SQS 1 MiB body limit; not enqueued')
+          Path('request.json').write_bytes(body)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"request={envelope['operation']}:{envelope['workflowRunId']}:{envelope['workflowRunAttempt']}\n")
+      - name: Assume metadata-only queue role
+        uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df
+        with:
+          role-to-assume: ${{ vars.CDKTF_PIPELINE_DISPATCH_ROLE_ARN }}
+          aws-region: ${{ vars.CDKTF_PIPELINE_REGION }}
+      - name: Enqueue without credentials or checkout
+        env:
+          QUEUE_URL: ${{ vars.CDKTF_PIPELINE_QUEUE_URL }}
+        run: aws sqs send-message --queue-url "$QUEUE_URL" --message-body file://request.json --query MessageId --output text
+  wait:
+    needs: enqueue
+    runs-on: ubuntu-24.04
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Wait for correlated application result (timeout is not success or cleanup)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST: ${{ needs.enqueue.outputs.request }}
+          REPOSITORY: ${{ github.repository }}
+          OPERATION: baseline.publish
+        shell: python
+        run: |
+          import json, os, subprocess, time
+          event = json.load(open(os.environ['GITHUB_EVENT_PATH']))
+          if os.environ['OPERATION'] == 'baseline.publish':
+              sha = event.get('after') or os.environ['GITHUB_SHA']
+          else:
+              number = event.get('pull_request', {}).get('number') or event['inputs']['pr_number']
+              pr = json.loads(subprocess.check_output(['gh', 'api', f"repos/{os.environ['REPOSITORY']}/pulls/{number}" ]))
+              sha = pr['head']['sha']
+          deadline = time.monotonic() + 3600
+          while time.monotonic() < deadline:
+              result = json.loads(subprocess.check_output(['gh', 'api', f"repos/{os.environ['REPOSITORY']}/commits/{sha}/check-runs?filter=all&per_page=100"]))
+              matches = [c for c in result['check_runs'] if c.get('external_id') == 'lifecycle:' + os.environ['REQUEST'] and c.get('app', {}).get('id') == 5231328]
+              if matches and matches[0]['status'] == 'completed':
+                  print(matches[0]['html_url'])
+                  raise SystemExit(0 if matches[0]['conclusion'] == 'success' else 1)
+              time.sleep(15)
+          raise SystemExit('No correlated terminal application result within 60 minutes')
