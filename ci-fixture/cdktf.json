@@ -1,0 +1,6 @@
+{
+  "language": "typescript",
+  "app": "pnpm exec tsx src/main.ts",
+  "output": "cdktf.out",
+  "projectId": "b8760e08-a661-45f7-913a-6f76a3cc3937"
+}

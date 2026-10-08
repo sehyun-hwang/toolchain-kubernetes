@@ -1,0 +1,22 @@
+{
+  "name": "cdktn-ci-tutorial-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "synth": "cdktn synth fixture-app",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "deploy": "cdktn deploy fixture-app --skip-synth --auto-approve"
+  },
+  "dependencies": {
+    "@cdktn/provider-kubernetes": "17.0.1",
+    "cdktn": "0.24.0",
+    "constructs": "10.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "packageManager": "pnpm@11.7.0"
+}
