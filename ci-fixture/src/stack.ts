@@ -37,7 +37,7 @@ export class FixtureStack extends TerraformStack {
       if (!component || !image) throw new Error('component/image missing');
       const frontend = component === 'frontend';
       new DeploymentV1(this, frontend ? 'Frontend' : 'Backend', {
-        metadata: { generateName: `fixture-${component}-` },
+        metadata: { generateName: `fixture-${component}-`, labels: { 'ci.fixture/component': component } },
         spec: {
           replicas: '1', selector: { matchLabels: { 'ci.fixture/component': component } },
           template: {
