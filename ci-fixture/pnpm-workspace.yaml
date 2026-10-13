@@ -1,2 +1,4 @@
 minimumReleaseAgeExclude:
   - '@cdktn/provider-kubernetes@17.0.1'
+allowBuilds:
+  esbuild: true
