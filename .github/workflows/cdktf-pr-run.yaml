@@ -9,10 +9,13 @@ on:
         description: Same-repository PR number
         required: true
         type: string
+concurrency:
+  group: native-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions: {}
 jobs:
   enqueue:
-    if: github.repository == 'sehyun-hwang/toolchain-kubernetes' && (github.ref == vars.CDKTF_PIPELINE_APPROVED_REF)
+    if: github.repository == vars.CDKTF_PIPELINE_REPOSITORY && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     permissions:
       id-token: write
@@ -51,17 +54,22 @@ jobs:
   wait:
     needs: enqueue
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      head_sha: ${{ steps.prepare.outputs.head_sha }}
     permissions:
       checks: read
       contents: read
       pull-requests: read
     steps:
-      - name: Wait for correlated application result (timeout is not success or cleanup)
+      - name: Wait for correlated runner preparation
+        id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
           REQUEST: ${{ needs.enqueue.outputs.request }}
           REPOSITORY: ${{ github.repository }}
           OPERATION: pr.run
+          CHECK_NAME: 'CI / Prepare'
         shell: python
         run: |
           import json, os, subprocess, time
@@ -71,13 +79,44 @@ jobs:
           else:
               number = event.get('pull_request', {}).get('number') or event['inputs']['pr_number']
               pr = json.loads(subprocess.check_output(['gh', 'api', f"repos/{os.environ['REPOSITORY']}/pulls/{number}" ]))
-              sha = pr['head']['sha']
-          deadline = time.monotonic() + 3600
+              sha = event.get('pull_request', {}).get('head', {}).get('sha') or pr['head']['sha']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'head_sha={sha}\n')
+          deadline = time.monotonic() + 2100
           while time.monotonic() < deadline:
-              result = json.loads(subprocess.check_output(['gh', 'api', f"repos/{os.environ['REPOSITORY']}/commits/{sha}/check-runs?filter=all&per_page=100"]))
-              matches = [c for c in result['check_runs'] if c.get('external_id') == 'lifecycle:' + os.environ['REQUEST'] and c.get('app', {}).get('id') == 5231328]
+              result = json.loads(subprocess.check_output(['gh', 'api', f"repos/{os.environ['REPOSITORY']}/commits/{sha}/check-runs?filter=all&per_page=100", '--paginate', '--slurp']))
+              matches = [c for page in result for c in page['check_runs'] if c.get('external_id') == 'lifecycle:' + os.environ['REQUEST'] and c.get('app', {}).get('id') == 5231328 and c.get('name') == os.environ['CHECK_NAME'] and c.get('head_sha') == sha]
               if matches and matches[0]['status'] == 'completed':
                   print(matches[0]['html_url'])
                   raise SystemExit(0 if matches[0]['conclusion'] == 'success' else 1)
               time.sleep(15)
-          raise SystemExit('No correlated terminal application result within 60 minutes')
+          raise SystemExit('No correlated terminal application result within 35 minutes')
+  execute:
+    needs: wait
+    runs-on: [self-hosted, "ci-${{ github.run_id }}-${{ github.run_attempt }}"]
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact validated head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.wait.outputs.head_sha }}
+          persist-credentials: false
+      - name: Install exact dependencies and synthesize
+        working-directory: ci-fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm exec tsc --noEmit
+          pnpm exec tsx --test tests/*.test.ts
+          pnpm exec cdktn synth fixture-app
+      - name: Apply and test the prepared clone
+        working-directory: ci-fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=cdktf.out/stacks/fixture-app init -input=false
+          terraform -chdir=cdktf.out/stacks/fixture-app apply -input=false -auto-approve
+          bash tests/application.sh
